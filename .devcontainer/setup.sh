@@ -20,11 +20,6 @@ echo "✅ Verifying NextClade installation..."
 nextclade --version
 nextalign --version
 
-# Install R dependencies if needed
-if [ -f "script.R" ]; then
-    echo "📊 Installing R..."
-    sudo apt-get install -y r-base
-fi
 
 echo "✨ Setup complete! NextClade is ready to use."
 echo "Try running: nextclade --help"
