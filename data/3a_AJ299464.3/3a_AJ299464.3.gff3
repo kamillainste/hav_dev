@@ -1,0 +1,11 @@
+##gff-version 3
+#!gff-spec-version 1.21
+#!processor NCBI annotwriter
+##sequence-region AJ299464.3 1 7385
+##species https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=12092
+AJ299464.3	EMBL	region	1	7385	.	+	.	ID=AJ299464.3:1..7385;Dbxref=taxon:12092;country=Norway:Oestlandet;gbkey=Src;mol_type=genomic RNA;nat-host=Homo sapiens;note=genotype III A;old-name=Hepatitis A virus;strain=NOR-21;tissue-type=serum
+AJ299464.3	EMBL	CDS	644	7324	.	+	0	ID=cds-CAC14074.3;Dbxref=GOA:Q9DWR1,HSSP:1HAV,InterPro:IPR000199,InterPro:IPR000605,InterPro:IPR001205,InterPro:IPR001676,InterPro:IPR004004,InterPro:IPR007094,InterPro:IPR009003,InterPro:IPR014759,UniProtKB/Swiss-Prot:Q9DWR1,NCBI_GP:CAC14074.3;Name=CAC14074.3;Note=VP1-P2A region;gbkey=CDS;product=polyprotein;protein_id=CAC14074.3
+AJ299464.3	EMBL	mature_protein_region_of_CDS	644	3010	.	+	.	ID=id-CAC14074.3:1..789;Parent=cds-CAC14074.3;gbkey=Prot;product=P1 structural protein
+AJ299464.3	EMBL	mature_protein_region_of_CDS	3011	4903	.	+	.	ID=id-CAC14074.3:790..1420;Parent=cds-CAC14074.3;gbkey=Prot;product=P2 structural protein
+AJ299464.3	EMBL	mature_protein_region_of_CDS	4904	7321	.	+	.	ID=id-CAC14074.3:1421..2226;Parent=cds-CAC14074.3;gbkey=Prot;product=P3 structural protein
+
