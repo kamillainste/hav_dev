@@ -115,9 +115,8 @@ while IFS= read -r seqname; do
       metrics=$(grep -F "$seqname" "$tsv_file" | head -1)
       
       if [ -n "$metrics" ]; then
-        # Extract columns: alignmentScore, coverage, totalSubstitutions
-        # alignmentScore is column 15, coverage is column 19, totalSubstitutions is column 6
-        alignment_score=$(echo "$metrics" | cut -f15)
+        # Extract columns: alignmentScore (col 16), coverage (col 19), totalSubstitutions (col 6)
+        alignment_score=$(echo "$metrics" | cut -f16)
         coverage=$(echo "$metrics" | cut -f19)
         total_subs=$(echo "$metrics" | cut -f6)
         
@@ -150,8 +149,8 @@ while IFS= read -r seqname; do
   done
   
   # Write comparison row
-  # Handle non-numeric values in printf
-  printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n" \
+  # Handle non-numeric values in printf (need 12 format specifiers for 12 values)
+  printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n" \
     "$seqname" \
     "${scores[1a]:-N/A}" "${coverage[1a]:-N/A}" "${subs[1a]:-N/A}" \
     "${scores[1b]:-N/A}" "${coverage[1b]:-N/A}" "${subs[1b]:-N/A}" \
@@ -168,24 +167,30 @@ echo -e "${GREEN}✓ Comparison complete${NC}\n"
 # ============================================================================
 echo -e "${YELLOW}[STEP 3] Creating final merged results...${NC}\n"
 
-# Create final TSV (header + best match for each sequence)
-> "$FINAL_OUTPUT/nextclade_best_matches.tsv"
+# Create a mapping file of seqname -> best_ref for easy lookup
+> "$TEMP_DIR/best_matches.txt"
+tail -n +2 "$TEMP_DIR/alignment_scores.txt" | awk -F',' '{print $1 "\t" $(NF-1)}' > "$TEMP_DIR/best_matches.txt"
 
-# Get header from first available TSV
-header_file=$(ls "$RESULTS_DIR"/vs_*/nextclade.tsv | head -1)
-head -1 "$header_file" >> "$FINAL_OUTPUT/nextclade_best_matches.tsv"
+# Create final TSV with header
+first_header=$(head -1 "$RESULTS_DIR"/vs_*/nextclade.tsv | head -1)
+echo "$first_header" > "$FINAL_OUTPUT/nextclade_best_matches.tsv"
 
-# Add selected sequences from each genotype
+# For each genotype, add sequences where it's the best match
 for genotype in "${GENOTYPES[@]}"; do
   tsv_file="$RESULTS_DIR/vs_${genotype}/nextclade.tsv"
   
   if [ -f "$tsv_file" ]; then
-    # Get sequences where this genotype was best match
-    best_seqs=$(grep -f <(tail -n +2 "$TEMP_DIR/alignment_scores.txt" | awk -F',' -v g="$genotype" '$NF==g {print $1}') "$tsv_file" 2>/dev/null || true)
-    
-    if [ -n "$best_seqs" ]; then
-      echo "$best_seqs" >> "$FINAL_OUTPUT/nextclade_best_matches.tsv"
-    fi
+    # Create temp file with best-match sequences for this genotype
+    tail -n +2 "$tsv_file" | while IFS=$'\t' read -r line; do
+      # Extract seqname (column 2)
+      seqname=$(echo "$line" | cut -f2)
+      # Check if this sequence's best match is this genotype
+      best_ref=$(grep "^${seqname}" "$TEMP_DIR/best_matches.txt" | cut -f2)
+      
+      if [ "$best_ref" = "$genotype" ]; then
+        echo "$line"
+      fi
+    done >> "$FINAL_OUTPUT/nextclade_best_matches.tsv"
   fi
 done
 
