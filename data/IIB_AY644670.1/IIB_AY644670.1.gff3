@@ -1,0 +1,8 @@
+##gff-version 3
+#!gff-spec-version 1.21
+#!processor NCBI annotwriter
+##sequence-region AY644670.1 1 7414
+##species https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=12092
+AY644670.1	Genbank	region	1	7414	.	+	.	ID=AY644670.1:1..7414;Dbxref=taxon:12092;country=Sierra Leone;gbkey=Src;genome=genomic;genotype=IIB;isolation-source=liver;mol_type=genomic RNA;nat-host=Homo sapiens;note=previously identified as genotype VII;old-name=Hepatitis A virus;strain=SLF88
+AY644670.1	Genbank	CDS	685	7368	.	+	0	ID=cds-AAK44219.2;Dbxref=NCBI_GP:AAK44219.2;Name=AAK44219.2;gbkey=CDS;product=polyprotein;protein_id=AAK44219.2
+

@@ -1,0 +1,8 @@
+##gff-version 3
+#!gff-spec-version 1.21
+#!processor NCBI annotwriter
+##sequence-region HQ246217.1 1 7420
+##species https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=12092
+HQ246217.1	Genbank	region	1	7420	.	+	.	ID=HQ246217.1:1..7420;Dbxref=taxon:12092;collection-date=May-1980;gbkey=Src;genome=genomic;genotype=IB;mol_type=genomic RNA;nat-host=chimpanzee;note=from Africa;old-name=Hepatitis A virus;strain=CFH-HAV
+HQ246217.1	Genbank	CDS	687	7370	.	+	0	ID=cds-AEN93981.1;Dbxref=NCBI_GP:AEN93981.1;Name=AEN93981.1;gbkey=CDS;product=polyprotein;protein_id=AEN93981.1
+

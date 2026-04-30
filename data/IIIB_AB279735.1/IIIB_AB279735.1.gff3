@@ -1,0 +1,10 @@
+##gff-version 3
+#!gff-spec-version 1.21
+#!processor NCBI annotwriter
+##sequence-region AB279735.1 1 7478
+##species https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=12092
+AB279735.1	DDBJ	region	1	7478	.	+	.	ID=AB279735.1:1..7478;Dbxref=taxon:12092;clone=HAJ85-1F;collection-date=1985;country=Japan: Yamanashi;gbkey=Src;isolate=HAJ85-1;isolation-source=serum;mol_type=genomic RNA;nat-host=Homo sapiens;note=complete genome%3B subgenotype IIIB%3B isolated from a Japanese patient with sporadic acute hepatitis A who had never been abroad.;old-name=Hepatitis A virus
+AB279735.1	DDBJ	five_prime_UTR	1	715	.	+	.	ID=id-AB279735.1:1..715;gbkey=5'UTR
+AB279735.1	DDBJ	CDS	716	7402	.	+	0	ID=cds-BAF63623.1;Dbxref=NCBI_GP:BAF63623.1;Name=BAF63623.1;gbkey=CDS;product=polyprotein;protein_id=BAF63623.1
+AB279735.1	DDBJ	three_prime_UTR	7403	7478	.	+	.	ID=id-AB279735.1:7403..7478;Note=with poly(A) tail of 16 nt.;gbkey=3'UTR
+

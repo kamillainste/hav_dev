@@ -1,0 +1,8 @@
+##gff-version 3
+#!gff-spec-version 1.21
+#!processor NCBI annotwriter
+##sequence-region AY644676.1 1 7426
+##species https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=12092
+AY644676.1	Genbank	region	1	7426	.	+	.	ID=AY644676.1:1..7426;Dbxref=taxon:12092;country=France;gbkey=Src;genome=genomic;genotype=IIA;isolate=CF53/Berne;isolation-source=FRHK-4 cell culture%3B 12th passage from the first isolation;mol_type=genomic RNA;old-name=Hepatitis A virus
+AY644676.1	Genbank	CDS	686	7363	.	+	0	ID=cds-AAU87586.1;Dbxref=NCBI_GP:AAU87586.1;Name=AAU87586.1;gbkey=CDS;product=polyprotein;protein_id=AAU87586.1
+

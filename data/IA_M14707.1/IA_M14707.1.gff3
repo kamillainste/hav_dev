@@ -1,0 +1,26 @@
+##gff-version 3
+#!gff-spec-version 1.21
+#!processor NCBI annotwriter
+##sequence-region M14707.1 1 7478
+##species https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=12092
+M14707.1	Genbank	region	1	7478	.	+	.	ID=M14707.1:1..7478;Dbxref=taxon:12092;gbkey=Src;mol_type=genomic RNA;old-name=Hepatitis A virus
+M14707.1	Genbank	transcript	1	7478	.	+	.	ID=rna-M14707.1:1..7478;Note=hepatitis A viral genome;gbkey=misc_RNA
+M14707.1	Genbank	exon	1	7478	.	+	.	ID=exon-M14707.1:1..7478-1;Parent=rna-M14707.1:1..7478;Note=hepatitis A viral genome;gbkey=misc_RNA
+M14707.1	Genbank	CDS	735	7418	.	+	0	ID=cds-AAA45465.1;Dbxref=NCBI_GP:AAA45465.1;Name=AAA45465.1;gbkey=CDS;product=AAA45465.1;protein_id=AAA45465.1
+M14707.1	Genbank	mature_protein_region_of_CDS	735	803	.	+	.	ID=id-AAA45465.1:1..23;Parent=cds-AAA45465.1;gbkey=Prot;product=1A VP4a mature peptide (alt.)
+M14707.1	Genbank	CDS	741	7418	.	+	0	ID=cds-AAA45466.1;Dbxref=NCBI_GP:AAA45466.1;Name=AAA45466.1;gbkey=CDS;product=AAA45466.1;protein_id=AAA45466.1
+M14707.1	Genbank	mature_protein_region_of_CDS	741	803	.	+	.	ID=id-AAA45466.1:1..21;Parent=cds-AAA45466.1;gbkey=Prot;product=1A VP4b mature peptide (alt.)
+M14707.1	Genbank	mature_protein_region_of_CDS	804	1469	.	+	.	ID=id-AAA45466.1:22..243;Parent=cds-AAA45466.1;gbkey=Prot;product=1B VP2 mature peptide
+M14707.1	Genbank	mature_protein_region_of_CDS	1470	2207	.	+	.	ID=id-AAA45466.1:244..489;Parent=cds-AAA45466.1;gbkey=Prot;product=1C VP3 mature peptide
+M14707.1	Genbank	mature_protein_region_of_CDS	2208	3107	.	+	.	ID=id-AAA45466.1:490..789;Parent=cds-AAA45466.1;gbkey=Prot;product=1D VP1 mature peptide
+M14707.1	Genbank	mature_protein_region_of_CDS	3108	3674	.	+	.	ID=id-AAA45466.1:790..978;Parent=cds-AAA45466.1;gbkey=Prot;product=2A mature peptide
+M14707.1	Genbank	mature_protein_region_of_CDS	3675	3995	.	+	.	ID=id-AAA45466.1:979..1085;Parent=cds-AAA45466.1;gbkey=Prot;product=2B mature peptide
+M14707.1	Genbank	mature_protein_region_of_CDS	3996	5000	.	+	.	ID=id-AAA45466.1:1086..1420;Parent=cds-AAA45466.1;gbkey=Prot;product=2C mature peptide
+M14707.1	Genbank	mature_protein_region_of_CDS	5001	5222	.	+	.	ID=id-AAA45466.1:1421..1494;Parent=cds-AAA45466.1;gbkey=Prot;product=3A mature peptide
+M14707.1	Genbank	mature_protein_region_of_CDS	5223	5291	.	+	.	ID=id-AAA45466.1:1495..1517;Parent=cds-AAA45466.1;gbkey=Prot;product=3B (VPg) mature peptide
+M14707.1	Genbank	mature_protein_region_of_CDS	5292	5948	.	+	.	ID=id-AAA45466.1:1518..1736;Parent=cds-AAA45466.1;gbkey=Prot;product=3C mature peptide
+M14707.1	Genbank	mature_protein_region_of_CDS	5949	7415	.	+	.	ID=id-AAA45466.1:1737..2225;Parent=cds-AAA45466.1;gbkey=Prot;product=3D mature peptide
+M14707.1	Genbank	sequence_alteration	871	871	.	+	.	ID=id-M14707.1:871..871;Note=c in pHAVlb39%2C t in pHAVlb113;gbkey=variation
+M14707.1	Genbank	sequence_alteration	2196	2196	.	+	.	ID=id-M14707.1:2196..2196;Note=g in pHAVlb39%2C a in pHAVlb1307;gbkey=variation
+M14707.1	Genbank	sequence_alteration	6216	6216	.	+	.	ID=id-M14707.1:6216..6216;Note=t in pHAVlb93%2C c in pHAVlb24;gbkey=variation
+

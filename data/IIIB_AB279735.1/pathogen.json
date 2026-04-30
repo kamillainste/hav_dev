@@ -1,0 +1,44 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nextstrain/nextclade/refs/heads/release/packages/nextclade-schemas/input-pathogen-json.schema.json",
+  "schemaVersion": "3.0.0",
+  "files": {
+    "reference": "IIIB_AB279735.1.fa",
+    "pathogenJson": "pathogen.json",
+    "genomeAnnotation": "IIIB_AB279735.1.gff3",
+    "examples": "example_sequences.fasta",
+    "readme": "README.md",
+    "changelog": "CHANGELOG.md"
+  },
+  "attributes": {
+    "name": "Hepatitis A virus",
+    "reference name": "Hepatitis A virus strain AB279735.1",
+    "reference accession": "AB279735.1"
+  },
+  "qc": {
+    "missingData": {
+      "enabled": true,
+      "missingDataThreshold": 2000,
+      "scoreBias": 500
+    },
+    "snpClusters": {
+      "enabled": true,
+      "windowSize": 100,
+      "clusterCutOff": 6
+    },
+    "mixedSites": {
+      "enabled": true,
+      "mixedSitesThreshold": 15
+    },
+    "privateMutations": {
+      "enabled": true,
+      "typical": 8,
+      "cutoff": 100
+    },
+    "frameShifts": {
+      "enabled": true
+    },
+    "stopCodons": {
+      "enabled": true
+    }
+  }
+}
