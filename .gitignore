@@ -1,0 +1,38 @@
+# ── Secret / sensitive data — never commit ────────────────────────────────────
+# PCR primer schemes (kept on a local/internal drive)
+data/Primers/
+
+# Internal sequence database exports, metadata and derived BLAST databases
+data/local_datasets/
+
+# Batch input/output folders (regeneratable from raw reads / FASTA)
+/batches/
+data/Batch-*/
+data/HAV-*/
+
+# Lineage registries backups
+data/lineage_designations_backup_*.tsv
+
+# ── Regeneratable datasets ────────────────────────────────────────────────────
+# Community Nextclade datasets (fetch with: nextclade dataset get --name <name>)
+data/nextclade_datasets/hav-vp1-2b/
+data/nextclade_datasets/hav-whole-genome/
+data/nextclade_datasets/sars-cov-2/
+# build_vp1b_lineage_dataset.sh working directory
+data/nextclade_datasets/_work_vp1b_lineages/
+
+# ── Generated artifacts ───────────────────────────────────────────────────────
+data/Primers/PCR_primers/primer_alignment.fasta
+data/Primers/PCR_primers/primer_binding_sites*.gff3
+scripts/batch_report.html
+scripts/batch_report.knit.md
+scripts/batch_report_files/
+scripts/_*.py
+scripts/_*.sh
+
+# ── Environments & session artifacts ──────────────────────────────────────────
+.conda/
+.Rhistory
+.RData
+.Rproj.user/
+.positai
