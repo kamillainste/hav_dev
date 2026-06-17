@@ -1,0 +1,20 @@
+# Normalize line endings for text files
+# Ensures bash/python/R scripts use LF (Unix) line endings across all platforms
+
+# Shell scripts
+*.sh text eol=lf
+
+# Python scripts
+*.py text eol=lf
+
+# R scripts and R Markdown
+*.R text eol=lf
+*.Rmd text eol=lf
+
+# YAML config files
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Other text files
+*.md text eol=lf
+.gitignore text eol=lf
