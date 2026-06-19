@@ -196,10 +196,11 @@ echo PROJECT_DIR: $PROJECT_DIR
 
 BATCH_DIR="$BATCH_DIR/$YEAR/$BATCH_NAME"
 echo BATCH_DIR: $BATCH_DIR
-
+ls "$BATCH_DIR"
 echo SAMPLESHEET: $SAMPLESHEET
 SAMPLESHEET_ARRAY=("$BATCH_DIR"/*samplesheet.tsv)
 SAMPLESHEET="${SAMPLESHEET_ARRAY[0]}"
+echo SAMPLESHEET: $SAMPLESHEET
 
 if [[ ! -f "$SAMPLESHEET" ]]; then
   echo "ERROR: Could not find samplesheet in $BATCH_DIR" >&2
@@ -340,7 +341,26 @@ fi
 #fi
 ### Må fikse denne delen senere - prøver å komme bort fra å oppgi mappe som fasta ligger i samplesheet 
 
-
+# Kan slettes når alt er ferdig
+echo "════════════════════════════════════════════════════════════════"
+echo "hav_wrapper.sh – sjekk av variabler"
+echo "  Batch     : $BATCH_NAME"
+echo "  Mode      : $MODE"
+echo "  Dataset   : $DATASET_DATE"
+echo "  Threads   : $THREADS"
+echo "  Neighbors : $N_NEIGHBORS"
+echo "  Started   : $(date)"
+echo "  Log       : $LOGFILE"
+echo "  BATCH_DIR : $BATCH_DIR"
+ls "$BATCH_DIR"
+echo "  BATCH_FA  : $BATCH_FA"
+echo "  OUT_BASE  : $OUT_BASE"
+echo "  DATASET_DIR : $DATASET_DIR"
+ls "$DATASET_DIR"
+echo "  SAMPLESHEET : $SAMPLESHEET"
+echo "  PRIMER_NAMES : $PRIMER_NAMES"
+echo "  PRIMERS_FILE : $PRIMERS_FILE" 
+echo "════════════════════════════════════════════════════════════════"
 
 # ════════════════════════════════════════════════════════════════════════════
 # COMMON STEPS — BLAST + NextClade → trees → report
@@ -352,14 +372,14 @@ fi
 
 # ── BLAST + NextClade ─────────────────────────────────────────────────────────
 step "BLAST + NextClade"
-ANALYSES_ARGS=("$BATCH_DIR" "$DATASET_DATE")
 
+# Build arguments array for optional flags
+OPTIONAL_ARGS=()
 if [[ "$MODE" == "sanger" && -n "$PRIMER_NAMES" ]]; then
-  ANALYSES_ARGS+=(--sanger --primer-names "$PRIMER_NAMES")
-  [[ -n "$PRIMERS_FILE" ]] && ANALYSES_ARGS+=(--primers-file "$PRIMERS_FILE")
+  OPTIONAL_ARGS+=(--sanger --primer-names "$PRIMER_NAMES")
+  [[ -n "$PRIMERS_FILE" ]] && OPTIONAL_ARGS+=(--primers-file "$PRIMERS_FILE")
 fi
 
-bash scripts/run_all_analyses.sh "${ANALYSES_ARGS[@]}"
-
-## Forslag: legge til flere argumenter som sendes inn i run_all_analyses.sh, feks fasta variabel, dataset_dir variabel og kanskje flere?
+# Pass arguments directly to preserve spaces in paths
+bash scripts/run_all_analyses.sh "$BATCH_DIR" "$DATASET_DATE" "$BATCH_FA" "$DATASET_DIR" "$OUT_BASE" "${OPTIONAL_ARGS[@]}"
 

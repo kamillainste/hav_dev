@@ -59,13 +59,13 @@ if [[ $# -lt 1 ]]; then
 fi
 
 BATCH_DIR="$1"
-shift
+DATASET_DATE="$2"
+BATCH_FA="$3"
+DATASET_DIR="$4"
+OUT_BASE="$5"
 
-DATASET_DATE="2026-04-10"
-if [[ $# -gt 0 && "$1" != --* ]]; then
-  DATASET_DATE="$1"
-  shift
-fi
+# Skip the 5 positional arguments before processing flags
+shift 5
 
 IS_SANGER=0
 PRIMER_NAMES=""
@@ -118,12 +118,9 @@ if [[ "$IS_SANGER" -eq 1 && -z "$PRIMER_NAMES" ]]; then
 fi
 
 PROJECT_DIR="$(pwd)"
-DATASET_BASE="$PROJECT_DIR/data/local_datasets/$DATASET_DATE"
 LINEAGES_DATASET="$PROJECT_DIR/data/nextclade_datasets/hav-vp1-2b-lineages"
 
 BATCH_NAME=$(basename "$BATCH_DIR")
-BATCH_FA="$PROJECT_DIR/$BATCH_DIR/${BATCH_NAME}.fa"
-OUT_BASE="$PROJECT_DIR/$BATCH_DIR/output"
 THREADS=4
 
 cd "$PROJECT_DIR"
@@ -133,8 +130,8 @@ if [[ ! -f "$BATCH_FA" ]]; then
   echo "ERROR: Batch FASTA not found: $BATCH_FA" >&2
   exit 1
 fi
-if [[ ! -d "$DATASET_BASE" ]]; then
-  echo "ERROR: Local dataset directory not found: $DATASET_BASE" >&2
+if [[ ! -d "$DATASET_DIR" ]]; then
+  echo "ERROR: Local dataset directory not found: $DATASET_DIR" >&2
   exit 1
 fi
 if [[ ! -d "$LINEAGES_DATASET" ]]; then
@@ -148,6 +145,22 @@ echo "════════════════════════�
 echo "HAV Batch Analysis: $BATCH_NAME  (dataset: $DATASET_DATE)"
 echo "════════════════════════════════════════════════════════════════"
 echo ""
+
+# Kan slettes når alt er ferdig
+echo "════════════════════════════════════════════════════════════════"
+echo "run_all_analyses.sh – sjekk av variabler før start"
+echo "  Dataset   : $DATASET_DATE"
+echo "  Threads   : $THREADS"
+echo "  BATCH_DIR : $BATCH_DIR"
+ls "$BATCH_DIR"
+echo "  BATCH_FA  : $BATCH_FA"
+echo "  OUT_BASE  : $OUT_BASE"
+echo "  DATASET_DIR : $DATASET_DIR"
+ls "$DATASET_DIR"
+echo "  PRIMER_NAMES : $PRIMER_NAMES"
+echo "  PRIMERS_FILE : $PRIMERS_FILE" 
+echo "════════════════════════════════════════════════════════════════"
+
 
 # ── Optional pre-step: coordinate-based primer trimming ──────────────────────
 ANALYSIS_FA="$BATCH_FA"
@@ -195,16 +208,8 @@ fi
 echo "▶ Step 1/2: BLAST"
 echo "─────────────────────────────────────────────────────────────────"
 
-# blast_batch.sh writes to <batch_dir>/<batch_name>_blast_results.tsv
-bash scripts/blast_batch.sh "$ANALYSIS_FA" "$DATASET_DATE"
-
-# Copy to output/ for consistency (original is kept alongside the FASTA)
-SRC_BLAST="$PROJECT_DIR/$BATCH_DIR/${BATCH_NAME}_blast_results.tsv"
-DST_BLAST="$OUT_BASE/blast_results.tsv"
-if [[ -f "$SRC_BLAST" ]]; then
-  cp "$SRC_BLAST" "$DST_BLAST"
-  echo "  Copied → $DST_BLAST"
-fi
+# blast_batch.sh writes directly to OUT_BASE
+bash scripts/blast_batch.sh "$ANALYSIS_FA" "$DATASET_DATE" "$DATASET_DIR" "$OUT_BASE"
 echo ""
 
 # ── Analysis 2: NextClade (lineages dataset) ──────────────────────────────────

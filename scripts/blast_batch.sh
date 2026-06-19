@@ -6,11 +6,13 @@
 #
 # Run from the project root with HAVDEV conda active:
 #   conda activate /path/to/hav_dev/.conda/HAVDEV
-#   bash scripts/blast_batch.sh <batch_fasta> [dataset_date]
+#   bash scripts/blast_batch.sh <batch_fasta> <dataset_date> <dataset_dir> <out_base>
 #
 # Arguments:
 #   batch_fasta    Path to the multi-FASTA file (e.g. data/Batch-1/Batch-1.fa)
 #   dataset_date   Dataset date folder (default: 2026-04-10)
+#   dataset_dir    Path to local dataset directory (e.g. /mnt/n/.../local_datasets/2026-04-10)
+#   out_base       Output directory where blast_results.tsv will be written
 #
 # Output columns (tab-separated):
 #   qseqid    query sequence ID
@@ -42,11 +44,14 @@
 set -euo pipefail
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-BATCH_FA="${1:?Usage: bash scripts/blast_batch.sh <batch_fasta> [dataset_date]}"
+BATCH_FA="${1:?Usage: bash scripts/blast_batch.sh <batch_fasta> <dataset_date> <dataset_dir> <out_base>}"
 DATASET_DATE="${2:-2026-04-10}"
+DATASET_DIR="${3:?dataset_dir is required}"
+OUT_BASE="${4:?out_base is required}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-DB_PATH="data/local_datasets/$DATASET_DATE/blast_db/hav"
+DB_PATH="$DATASET_DIR/blast_db/hav"
 THREADS=4
 EVALUE="1e-5"
 
@@ -56,10 +61,9 @@ if [[ "$BATCH_FA" == /* ]]; then
     BATCH_FA="${BATCH_FA#"$PROJECT_DIR/"}"
 fi
 
-# Derive output path alongside the batch FASTA
-BATCH_DIR="$(dirname "$BATCH_FA")"
-BATCH_NAME="$(basename "$BATCH_FA" .fa)"
-OUT_TSV="$BATCH_DIR/${BATCH_NAME}_blast_results.tsv"
+# Output goes directly to OUT_BASE
+mkdir -p "$OUT_BASE"
+OUT_TSV="$OUT_BASE/blast_results.tsv"
 
 cd "$PROJECT_DIR"
 
@@ -70,8 +74,10 @@ if [[ ! -f "$BATCH_FA" ]]; then
 fi
 
 if [[ ! -f "${DB_PATH}.nhr" && ! -f "${DB_PATH}.ndb" ]]; then
-    echo "ERROR: BLAST database not found at $PROJECT_DIR/$DB_PATH" >&2
-    echo "  Build it first: bash scripts/make_blast_db.sh $DATASET_DATE" >&2
+    echo "ERROR: BLAST database not found at $DB_PATH" >&2
+    echo "  Expected to find: ${DB_PATH}.nhr or ${DB_PATH}.ndb" >&2
+    echo "  DATASET_DIR: $DATASET_DIR" >&2
+    echo "  Build with: bash scripts/make_blast_db.sh $DATASET_DATE" >&2
     exit 1
 fi
 
@@ -81,11 +87,27 @@ if ! command -v blastn &> /dev/null; then
     exit 1
 fi
 
+# Kan slettes når alt er ferdig
+echo "════════════════════════════════════════════════════════════════"
+echo "blast_batch.sh – sjekk av variabler før start"
+echo "  Dataset   : $DATASET_DATE"
+echo "  Threads   : $THREADS"
+#echo "  BATCH_DIR : $BATCH_DIR"
+#ls "$BATCH_DIR"
+echo "  BATCH_FA  : $BATCH_FA"
+ls "$BATCH_FA"
+echo "  OUT_BASE  : $OUT_BASE"
+echo "  DATASET_DIR : $DATASET_DIR"
+ls "$DATASET_DIR"
+echo "════════════════════════════════════════════════════════════════"
+
+
+
 # ── Run BLAST ─────────────────────────────────────────────────────────────────
 echo "── Running blastn ────────────────────────────────────────────────────────"
-echo "  Query : $PROJECT_DIR/$BATCH_FA"
-echo "  DB    : $PROJECT_DIR/$DB_PATH"
-echo "  Output: $PROJECT_DIR/$OUT_TSV"
+echo "  Query  : $BATCH_FA"
+echo "  DB     : $DB_PATH"
+echo "  Output : $OUT_TSV"
 echo ""
 
 # Write header
@@ -95,14 +117,20 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n
     stitle qlen slen nident gaps qcovs \
     > "$OUT_TSV"
 
-blastn \
-    -query       "$BATCH_FA" \
-    -db          "$DB_PATH" \
-    -out         "$OUT_TSV.tmp" \
-    -evalue      "$EVALUE" \
-    -max_hsps    1 \
-    -num_threads "$THREADS" \
+# Build BLAST command as array to properly handle paths with spaces
+declare -a BLAST_CMD=(
+    blastn
+    -query       "$BATCH_FA"
+    -db          "$DB_PATH"
+    -out         "$OUT_TSV.tmp"
+    -evalue      "$EVALUE"
+    -max_hsps    1
+    -num_threads "$THREADS"
     -outfmt      "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore stitle qlen slen nident gaps qcovs"
+)
+
+# Execute BLAST command
+"${BLAST_CMD[@]}"
 
 cat "$OUT_TSV.tmp" >> "$OUT_TSV"
 rm  "$OUT_TSV.tmp"
