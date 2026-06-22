@@ -7,10 +7,11 @@
 #   - Nearest-node sequences from all NextClade runs (nearestNodeName from NDJSON)
 #
 # Usage (from project root, HAVDEV conda active):
-#   bash scripts/build_per_seq_trees.sh <batch_dir> [dataset_date] [n_neighbors]
+#   bash scripts/build_per_seq_trees.sh <batch_dir> [dataset_date] [n_neighbors] [output_base]
 #
 # Example:
 #   bash scripts/build_per_seq_trees.sh data/Batch-1 2026-04-10 50
+#   bash scripts/build_per_seq_trees.sh data/Batch-1 2026-04-10 50 data/Batch-1/output
 #
 # Writes per sequence to <batch_dir>/output/trees/<seqName>/:
 #   neighbors.txt         — list of reference IDs used
@@ -27,19 +28,19 @@
 
 set -euo pipefail
 
-BATCH_DIR="${1:?Usage: bash scripts/build_per_seq_trees.sh <batch_dir> [dataset_date] [n_neighbors]}"
+BATCH_DIR="${1:?Usage: bash scripts/build_per_seq_trees.sh <batch_dir> [dataset_date] [n_neighbors] [output_base]}"
 DATASET_DATE="${2:-2026-04-10}"
 N_NEIGHBORS="${3:-30}"
+OUT_BASE="${4:?out_base is required}"
+DATASET_DIR="${5:?dataset_dir is required}"
+BATCH_FA="${6:?batch_fasta is required}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-DATASET_BASE="$PROJECT_DIR/data/local_datasets/$DATASET_DATE"
-DEDUP_FA="$DATASET_BASE/blast_db/input_dedup.fa"
-BLAST_DB="$DATASET_BASE/blast_db/hav"
+DEDUP_FA="$DATASET_DIR/blast_db/input_dedup.fa"
+BLAST_DB="$DATASET_DIR/blast_db/hav"
 
 BATCH_NAME=$(basename "$BATCH_DIR")
-BATCH_FA="$PROJECT_DIR/$BATCH_DIR/${BATCH_NAME}.fa"
-OUT_BASE="$PROJECT_DIR/$BATCH_DIR/output"
 TREES_DIR="$OUT_BASE/trees"
 
 BLAST_TSV="$OUT_BASE/blast_results.tsv"
@@ -52,6 +53,22 @@ COMMUNITY_SEQS_FA="$LINEAGES_DATASET/community_sequences.fasta"
 THREADS=4
 
 cd "$PROJECT_DIR"
+
+
+# Kan slettes når alt er ferdig
+echo "════════════════════════════════════════════════════════════════"
+echo "build_per_seq_trees.sh – sjekk av variabler før start"
+echo "  Dataset   : $DATASET_DATE"
+echo "  Threads   : $THREADS"
+echo "  BATCH_DIR : $BATCH_DIR"
+ls "$BATCH_DIR"
+echo "  BATCH_FA  : $BATCH_FA"
+echo "  OUT_BASE  : $OUT_BASE"
+echo "  DATASET_DIR : $DATASET_DIR"
+ls "$DATASET_DIR"
+
+echo "════════════════════════════════════════════════════════════════"
+
 
 # ── Validation ────────────────────────────────────────────────────────────────
 for f in "$BATCH_FA" "$BLAST_TSV" "$DEDUP_FA"; do
@@ -210,10 +227,11 @@ PYEOF
 
 # ── Process each query sequence ───────────────────────────────────────────────
 # Extract all query IDs from the batch FASTA
-QUERY_IDS=()
-while IFS= read -r line; do
-  [[ "$line" == ">"* ]] && QUERY_IDS+=("${line#>}")
-done < "$BATCH_FA"
+QUERY_IDS=()                          # Initialiserer tom array
+while IFS= read -r line; do           # Les hver linje fra FASTA-filen
+  [[ "$line" == ">"* ]] &&            # Hvis linja starter med ">" (FASTA header)
+    QUERY_IDS+=("${line#>}")          #   Fjern ">" og legg ID til array
+done < "$BATCH_FA"                    # Les fra BATCH_FA-filen
 
 echo "════════════════════════════════════════════════════════════════"
 echo "Building per-sequence trees: $BATCH_NAME"
@@ -235,7 +253,12 @@ for QUERY in "${QUERY_IDS[@]}"; do
 
   LINEAGES_TREE_JSON_ARG="$LINEAGES_TREE_JSON"
   [[ -f "$LINEAGES_TREE_JSON_ARG" ]] || LINEAGES_TREE_JSON_ARG="NONE"
-
+#Disse filene er valgfrie. 
+#Hvis NextClade-kjøringen ikke fullfører eller treet mangler, skal skriptet likevel kjøre 
+#— bare uten den ekstra informasjonen. 
+#Python-scriptet collect_neighbors.py sjekker deretter om verdien er "NONE" og 
+#hopper over den delen av analysen.
+ 
   python3 "$COLLECT_PY" \
     "$QUERY" "$N_NEIGHBORS" \
     "$BLAST_TSV" \
@@ -252,7 +275,8 @@ for QUERY in "${QUERY_IDS[@]}"; do
     continue
   fi
 
-  # Extract query sequence by exact FASTA header text.
+  # Extract query sequence by exact FASTA header text from batch FASTA.  
+  # BLAST truncates headers at whitespace, so we must match on the full header line, not just the query ID.
   # seqkit name matching truncates at whitespace for many FASTA styles.
   QUERY_FA="$SEQ_DIR/query.fa"
   awk -v q="$QUERY" '
