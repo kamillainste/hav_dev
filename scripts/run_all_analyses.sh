@@ -26,10 +26,15 @@
 #                  (closest-match / genotype confirmation)
 #   2. NextClade — against the public-derived hav-vp1-2b-lineages dataset
 #                  (assigns genotype `clade` + `lineage_phylo`)
+#   3. Per-sequence trees — builds IQ-TREE phylogenetic trees for each query
+#                  (using nearest neighbors from BLAST and NextClade)
+#   4. Batch report — generates interactive HTML report with visualizations
 #
 # Writes:
 #   <batch_dir>/output/blast_results.tsv
 #   <batch_dir>/output/lineages/nextclade.tsv   (+ aligned fasta, json, ndjson)
+#   <batch_dir>/output/trees/<seqName>/*        (neighbor lists, alignments, trees)
+#   <batch_dir>/output/batch_report.html        (interactive report with trees + plots)
 #
 # Prerequisites:
 #   - BLAST database built:   bash scripts/make_blast_db.sh [dataset_date]
@@ -235,15 +240,44 @@ N_SEQS=$(tail -n +2 "$LINEAGES_OUT/nextclade.tsv" | wc -l)
 echo "  Sequences processed: $N_SEQS"
 echo ""
 
+# ── Analysis 3: Per-sequence trees ────────────────────────────────────────────
+echo "▶ Step 3/3: Per-sequence trees (IQ-TREE with nearest neighbors)"
+echo "─────────────────────────────────────────────────────────────────"
+bash scripts/build_per_seq_trees.sh "$BATCH_DIR" "$DATASET_DATE" 30 "$OUT_BASE" "$DATASET_DIR" "$BATCH_FA"
+echo "  Results → $OUT_BASE/trees/"
+echo ""
+
+# ── Analysis 4: Batch report ──────────────────────────────────────────────────
+echo "▶ Step 4/4: Generate batch report (HTML)"
+echo "─────────────────────────────────────────────────────────────────"
+
+REPORT_OUTPUT="$OUT_BASE/batch_report.html"
+
+"$HOME/.conda/R_shared/bin/Rscript" -e "
+rmarkdown::render(
+  'scripts/batch_report.Rmd',
+  output_file = '$REPORT_OUTPUT',
+  params = list(
+    batch_dir    = '$BATCH_DIR',
+    dataset_date = '$DATASET_DATE',
+    n_neighbors  = 30,
+    out_base     = '$OUT_BASE'
+  ),
+  quiet = TRUE
+)
+" || { echo "ERROR: Batch report generation failed" >&2; exit 1; }
+
+echo "  Report written: $REPORT_OUTPUT"
+echo ""
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo "════════════════════════════════════════════════════════════════"
 echo "All analyses complete for $BATCH_NAME"
 echo ""
-echo "  BLAST results       : $DST_BLAST"
+echo "  BLAST results       : $OUT_BASE/blast_results.tsv"
 echo "  NC lineages (FHI)   : $LINEAGES_OUT/nextclade.tsv"
-echo ""
-echo "  Next step — build per-sequence trees and generate report:"
-echo "    bash scripts/build_per_seq_trees.sh $BATCH_DIR $DATASET_DATE"
-echo "    \"\$HOME/.conda/R_shared/bin/Rscript\" -e \"rmarkdown::render('scripts/batch_report.Rmd', \\"
-echo "      params=list(batch_dir='$BATCH_DIR', dataset_date='$DATASET_DATE'))\""
+echo "  Per-sequence trees  : $OUT_BASE/trees/"
+echo "  Batch report        : $REPORT_OUTPUT"
 echo "════════════════════════════════════════════════════════════════"
+
+
