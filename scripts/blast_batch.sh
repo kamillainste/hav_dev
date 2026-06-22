@@ -99,6 +99,8 @@ ls "$BATCH_FA"
 echo "  OUT_BASE  : $OUT_BASE"
 echo "  DATASET_DIR : $DATASET_DIR"
 ls "$DATASET_DIR"
+echo "  DB_PATH : $DB_PATH"
+ls "${DB_PATH}".*
 echo "════════════════════════════════════════════════════════════════"
 
 
@@ -116,6 +118,15 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n
     qstart qend sstart send evalue bitscore \
     stitle qlen slen nident gaps qcovs \
     > "$OUT_TSV"
+
+# Opprett en midlertidig mappe i din home-direktory (uten mellomrom)
+mkdir -p "$HOME/blast_tmp_db"
+
+# Lag en symbolsk lenke direkte til hav-filene
+ln -sf "/mnt/n/Virologi/Hepatitt/Hepatitt A/HAV genteknologi/Databaser/local_datasets/2026-04-10/blast_db"/hav.* "$HOME/blast_tmp_db/"
+
+# Sett den nye stien som DB_PATH (uten mellomrom)
+DB_PATH="$HOME/blast_tmp_db/hav"
 
 # Build BLAST command as array to properly handle paths with spaces
 declare -a BLAST_CMD=(
