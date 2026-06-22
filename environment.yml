@@ -24,3 +24,7 @@ dependencies:
 
   # ── CLI helpers used by shell scripts ───────────────────────────────────
   - jq                     # JSON parsing in helper scripts
+
+
+# må legge til conda install -c conda-forge pandoc
+# eller i R? "$HOME/.conda/R_shared/bin/Rscript" -e "tinytex::install_tinytex()" 
