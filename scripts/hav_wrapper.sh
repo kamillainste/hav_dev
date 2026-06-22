@@ -60,6 +60,9 @@
 
 set -euo pipefail
 
+
+#Legge til aktivering av conda miljø i starten av script??
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 RSCRIPT="$HOME/.conda/R_shared/bin/Rscript"
 DEFAULT_DATASET_DATE="2026-04-10"
