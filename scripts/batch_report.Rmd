@@ -12,6 +12,7 @@ output:
 params:
   batch_dir:    "data/Batch-1"
   dataset_date: "2026-04-10"
+  out_base:    "data/Batch-1/output"
   n_neighbors:  30
   zoom_count: 5
   zoom_width: 35
@@ -43,12 +44,13 @@ suppressPackageStartupMessages({
 # ── Paths ────────────────────────────────────────────────────────────────────
 proj_dir     <- normalizePath(file.path(dirname(knitr::current_input(dir = TRUE)), ".."),
                               mustWork = FALSE)
-batch_dir    <- file.path(proj_dir, params$batch_dir)
-out_dir      <- file.path(batch_dir, "output")
+#batch_dir    <- file.path(proj_dir, params$batch_dir)
+batch_dir    <- file.path(params$batch_dir)
+#out_dir      <- file.path(batch_dir, "output")
+out_dir      <- file.path(params$out_base)
 trees_dir    <- file.path(out_dir, "trees")
 dataset_base <- file.path(proj_dir, "data", "local_datasets", params$dataset_date)
 metadata_tsv <- file.path(dataset_base, "metadata_corrected.tsv")
-
 batch_name   <- basename(params$batch_dir)
 input_fasta  <- file.path(batch_dir, paste0(batch_name, ".fa"))
 
@@ -76,8 +78,10 @@ norm_id <- function(x) {
 # ── Load data ─────────────────────────────────────────────────────────────────
 
 # Reference metadata
-meta <- safe_tsv(metadata_tsv) %>%
-  mutate(date = as.character(date))
+meta <- safe_tsv(metadata_tsv)
+if (nrow(meta) > 0 && "date" %in% names(meta)) {
+  meta <- meta %>% mutate(date = as.character(date))
+}
 
 # Community sequence metadata from hav-vp1-2b-lineages tree.json
 # Provides clade_membership + lineage_phylo for NCBI accessions used as neighbors
@@ -251,11 +255,15 @@ if (nrow(nc_lineages) > 0) {
 # All query names (from NC-lineages)
 all_queries <- nc_lineages$seqName
 
-# ── Blast top hits per query ──────────────────────────────────────────────────
+# Metadata for date join (only if columns exist)
+meta_for_date_join <- if (all(c("id", "date") %in% names(meta))) {
+  meta %>% select(id, date) %>% rename(sseqid = id, hit_date = date)
+} else {
+  tibble(sseqid = character(), hit_date = character())
+}
+
 blast_top <- blast_raw %>%
-  left_join(meta %>% select(id, lineage, genotype) %>%
-              rename(sseqid = id, hit_lineage = lineage, hit_genotype = genotype),
-            by = "sseqid") %>%
+  left_join(meta_for_join, by = "sseqid") %>%
   arrange(qseqid, desc(bitscore)) %>%
   group_by(qseqid) %>%
   mutate(hit_rank = row_number()) %>%
@@ -461,8 +469,12 @@ primer_hits <- if (nrow(input_seq_summary) > 0 && nrow(primer_catalog) > 0) {
   tibble()
 }
 
-primer_hits_table <- primer_hits %>%
-  arrange(seqName, match_side, desc(overlap_nt), primer_name)
+primer_hits_table <- if (nrow(primer_hits) > 0) {
+  primer_hits %>%
+    arrange(seqName, match_side, desc(overlap_nt), primer_name)
+} else {
+  tibble()
+}
 
 primer_hit_plot <- if (nrow(primer_hits_table) > 0) {
   plot_df <- primer_hits_table %>%
@@ -522,8 +534,16 @@ seq_fg <- nc_lineages_raw %>%
   )
 
 # Which sequence ends have flagged primer remnants?
-left_hit_seqs  <- primer_hits_table %>% filter(match_side == "left")  %>% pull(seqName) %>% unique()
-right_hit_seqs <- primer_hits_table %>% filter(match_side == "right") %>% pull(seqName) %>% unique()
+left_hit_seqs  <- if (nrow(primer_hits_table) > 0) {
+  primer_hits_table %>% filter(match_side == "left")  %>% pull(seqName) %>% unique()
+} else {
+  character()
+}
+right_hit_seqs <- if (nrow(primer_hits_table) > 0) {
+  primer_hits_table %>% filter(match_side == "right") %>% pull(seqName) %>% unique()
+} else {
+  character()
+}
 
 # Build y positions: reference at bottom, then primers, then input sequences
 bar_h     <- 0.37
