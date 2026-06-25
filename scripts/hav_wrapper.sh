@@ -62,6 +62,7 @@ set -euo pipefail
 
 
 #Legge til aktivering av conda miljø i starten av script??
+#Hva med mount til N: ? Løser seg på NGS4. 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 RSCRIPT="$HOME/.conda/R_shared/bin/Rscript"
