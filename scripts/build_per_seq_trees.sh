@@ -229,8 +229,12 @@ PYEOF
 # Extract all query IDs from the batch FASTA
 QUERY_IDS=()                          # Initialiserer tom array
 while IFS= read -r line; do           # Les hver linje fra FASTA-filen
-  [[ "$line" == ">"* ]] &&            # Hvis linja starter med ">" (FASTA header)
-    QUERY_IDS+=("${line#>}")          #   Fjern ">" og legg ID til array
+  [[ "$line" == ">"* ]] && {
+    # Fjern ">" og trim ALL whitespace including newlines/carriage returns
+    id="${line#>}"
+    id=$(echo "$id" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    QUERY_IDS+=("$id")
+  }
 done < "$BATCH_FA"                    # Les fra BATCH_FA-filen
 
 echo "════════════════════════════════════════════════════════════════"
@@ -242,7 +246,10 @@ echo "════════════════════════�
 echo ""
 
 for QUERY in "${QUERY_IDS[@]}"; do
-  SEQ_DIR="$TREES_DIR/$QUERY"
+  # Normalize: trim whitespace and take only first token (before space)
+  # This ensures folder names match what NextClade produces
+  QUERY_NORMALIZED=$(echo "$QUERY" | awk '{print $1}' | xargs)
+  SEQ_DIR="$TREES_DIR/$QUERY_NORMALIZED"
   mkdir -p "$SEQ_DIR"
 
   echo "── $QUERY ─────────────────────────────────────────────────────"
@@ -260,7 +267,7 @@ for QUERY in "${QUERY_IDS[@]}"; do
 #hopper over den delen av analysen.
  
   python3 "$COLLECT_PY" \
-    "$QUERY" "$N_NEIGHBORS" \
+    "$QUERY_NORMALIZED" "$N_NEIGHBORS" \
     "$BLAST_TSV" \
     "$NC_LINEAGES_NDJSON_ARG" \
     "NONE" \
@@ -379,7 +386,6 @@ with open('$TRIMMED_FA') as f:
       -T   AUTO
       --prefix "$TREE_PREFIX"
       -redo
-      --quiet
     )
   else
     echo "  Running IQ-TREE (GTR+G, 1000 UFBoot)..."
@@ -390,19 +396,30 @@ with open('$TRIMMED_FA') as f:
       -T   AUTO
       --prefix "$TREE_PREFIX"
       -redo
-      --quiet
     )
   fi
 
   # Remove old IQ-TREE output to allow --redo-free run
   rm -f "$TREE_PREFIX".* 2>/dev/null || true
 
-  "$IQTREE_BIN" "${IQTREE_ARGS[@]}"
+  # Run IQ-TREE and capture errors
+  if "$IQTREE_BIN" "${IQTREE_ARGS[@]}" 2>&1 | tee "$SEQ_DIR/iqtree.log"; then
+    IQTREE_STATUS=0
+  else
+    IQTREE_STATUS=$?
+  fi
 
   if [[ -f "$TREE_PREFIX.treefile" ]]; then
-    echo "  Tree written: $TREE_PREFIX.treefile"
+    echo "  ✓ Tree written: $TREE_PREFIX.treefile"
   else
-    echo "  WARNING: IQ-TREE did not produce a treefile for $QUERY"
+    echo "  ✗ WARNING: IQ-TREE did not produce a treefile for $QUERY"
+    if [[ $IQTREE_STATUS -ne 0 ]]; then
+      echo "    IQ-TREE exit code: $IQTREE_STATUS"
+    fi
+    if [[ -f "$SEQ_DIR/iqtree.log" ]]; then
+      echo "    Last 10 lines of IQ-TREE log:"
+      tail -10 "$SEQ_DIR/iqtree.log" | sed 's/^/      /'
+    fi
   fi
   echo ""
 done
