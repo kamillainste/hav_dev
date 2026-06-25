@@ -230,6 +230,7 @@ fi
 
 nextclade run \
   --input-dataset    "$LINEAGES_DATASET" \
+  --alignment-preset high-diversity \
   --output-all       "$LINEAGES_OUT" \
   --jobs             "$THREADS" \
   --min-match-length "$MIN_MATCH_LENGTH" \
@@ -258,10 +259,12 @@ rmarkdown::render(
   'scripts/batch_report.Rmd',
   output_file = '$REPORT_OUTPUT',
   params = list(
-    batch_dir    = '$BATCH_DIR',
+    batch_dir    = '$BATCH_DIR',    
+    batch_fa     = '$BATCH_FA',    
     dataset_date = '$DATASET_DATE',
     n_neighbors  = 30,
-    out_base     = '$OUT_BASE'
+    out_base     = '$OUT_BASE',
+    dataset_dir  = '$DATASET_DIR'
   ),
   quiet = TRUE
 )
