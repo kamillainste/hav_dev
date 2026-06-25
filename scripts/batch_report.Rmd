@@ -11,8 +11,10 @@ output:
     self_contained: true
 params:
   batch_dir:    "data/Batch-1"
+  batch_fa:     "data/Batch-1/Batch-1.fa"
   dataset_date: "2026-04-10"
-  out_base:    "data/Batch-1/output"
+  dataset_dir:  "data/local_datasets/2026-04-10"
+  out_base:     "data/Batch-1/output"
   n_neighbors:  30
   zoom_count: 5
   zoom_width: 35
@@ -49,10 +51,11 @@ batch_dir    <- file.path(params$batch_dir)
 #out_dir      <- file.path(batch_dir, "output")
 out_dir      <- file.path(params$out_base)
 trees_dir    <- file.path(out_dir, "trees")
-dataset_base <- file.path(proj_dir, "data", "local_datasets", params$dataset_date)
+#dataset_base <- file.path(proj_dir, "data", "local_datasets", params$dataset_date)
+dataset_base <- file.path(params$dataset_dir)
 metadata_tsv <- file.path(dataset_base, "metadata_corrected.tsv")
 batch_name   <- basename(params$batch_dir)
-input_fasta  <- file.path(batch_dir, paste0(batch_name, ".fa"))
+input_fasta  <- file.path(params$batch_fa)
 
 # ── Helper: safe read_tsv ────────────────────────────────────────────────────
 safe_tsv <- function(path, ...) {
@@ -255,19 +258,32 @@ if (nrow(nc_lineages) > 0) {
 # All query names (from NC-lineages)
 all_queries <- nc_lineages$seqName
 
-# Metadata for date join (only if columns exist)
-meta_for_date_join <- if (all(c("id", "date") %in% names(meta))) {
-  meta %>% select(id, date) %>% rename(sseqid = id, hit_date = date)
+# Metadata for joining reference info to BLAST hits
+meta_for_join <- if (nrow(meta) > 0) {
+  meta_base <- meta %>% select(id, any_of(c("date", "genotype", "lineage"))) %>% rename(sseqid = id)
+  
+  # Conditionally rename columns if they exist
+  if ("genotype" %in% names(meta_base)) meta_base <- rename(meta_base, hit_genotype = genotype)
+  if ("lineage" %in% names(meta_base)) meta_base <- rename(meta_base, hit_lineage = lineage)
+  if ("date" %in% names(meta_base)) meta_base <- rename(meta_base, hit_date = date)
+  
+  meta_base
 } else {
-  tibble(sseqid = character(), hit_date = character())
+  tibble(sseqid = character())
 }
 
-blast_top <- blast_raw %>%
-  left_join(meta_for_join, by = "sseqid") %>%
-  arrange(qseqid, desc(bitscore)) %>%
-  group_by(qseqid) %>%
-  mutate(hit_rank = row_number()) %>%
-  ungroup()
+# Only proceed with join if blast_raw has data and the required column exists
+blast_top <- if (nrow(blast_raw) > 0 && "sseqid" %in% names(blast_raw)) {
+  blast_raw %>%
+    left_join(meta_for_join, by = "sseqid") %>%
+    arrange(qseqid, desc(bitscore)) %>%
+    group_by(qseqid) %>%
+    mutate(hit_rank = row_number()) %>%
+    ungroup()
+} else {
+  # Return empty tibble with expected structure if no BLAST results
+  blast_raw %>% mutate(hit_rank = NA_integer_)
+}
 
 blast_best <- blast_top %>%
   filter(hit_rank == 1) %>%
@@ -276,8 +292,8 @@ blast_best <- blast_top %>%
          blast_mismatch  = mismatch,
          blast_qcovs     = qcovs,
          blast_bitscore  = bitscore,
-         blast_lineage   = hit_lineage,
-         blast_genotype  = hit_genotype) %>%
+         blast_lineage   = any_of("hit_lineage"),
+         blast_genotype  = any_of("hit_genotype")) %>%
   # Some references encode the genotype in their name (e.g. "helgenom_gt_1a" →
   # IA) but carry no genotype in the metadata. Fall back to the name-derived
   # genotype, then harmonise every label to canonical uppercase (Ib → IB).
@@ -1308,10 +1324,18 @@ if (any(!is.na(summary_tbl$totalSubstitutions))) {
 
 ```{r blast-detail}
 if (nrow(blast_raw) > 0) {
+  # Prepare metadata join with safe column selection
+  meta_to_join <- meta %>%
+    select(id, any_of("date")) %>%
+    rename(sseqid = id)
+  
+  if ("date" %in% names(meta_to_join)) {
+    meta_to_join <- meta_to_join %>% rename(hit_date = date)
+  }
+  
   blast_top %>%
     filter(hit_rank <= 10) %>%
-    left_join(meta %>% select(id, date) %>% rename(sseqid = id, hit_date = date),
-              by = "sseqid") %>%
+    left_join(meta_to_join, by = "sseqid") %>%
     select(
       Query    = qseqid,
       Rank     = hit_rank,
@@ -1320,14 +1344,19 @@ if (nrow(blast_raw) > 0) {
       `Query cov%`  = qcovs,
       `SNPs`        = mismatch,
       `Bitscore`    = bitscore,
-      Genotype  = hit_genotype,
-      Lineage   = hit_lineage,
-      Date      = hit_date
+      any_of(c("hit_genotype", "hit_lineage", "hit_date"))
     ) %>%
-    mutate(across(c(`% identity`), ~round(., 2)),
-           Genotype = if_else(is.na(Genotype), "—", Genotype),
-           Lineage  = if_else(is.na(Lineage),  "—", Lineage),
-           Date     = if_else(is.na(Date),      "—", Date)) %>%
+    rename_with(~case_when(
+      . == "hit_genotype" ~ "Genotype",
+      . == "hit_lineage" ~ "Lineage",
+      . == "hit_date" ~ "Date",
+      TRUE ~ .
+    )) %>%
+    mutate(
+      `% identity` = round(`% identity`, 2),
+      across(any_of(c("Genotype", "Lineage", "Date")), 
+             ~replace_na(as.character(.), "—"))
+    ) %>%
     kbl() %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = TRUE) %>%
     scroll_box(height = "500px")
@@ -1438,6 +1467,9 @@ query_lp <- nc_lineages %>%
 query_ids <- summary_tbl$seqName
 called    <- c("a", "c", "g", "t")
 
+# Normalize query IDs to match tree directory names (first token only, trimmed)
+query_ids_normalized <- word(query_ids, 1)
+
 .is_called <- function(x) {
   x %in% called
 }
@@ -1507,8 +1539,8 @@ called    <- c("a", "c", "g", "t")
   ))
 }
 
-treefile_exists <- file.exists(file.path(trees_dir, query_ids, "tree.treefile"))
-aln_exists <- file.exists(file.path(trees_dir, query_ids, "aligned_trimmed.fa"))
+treefile_exists <- sapply(query_ids_normalized, function(id) file.exists(file.path(trees_dir, id, "tree.treefile")))
+aln_exists <- sapply(query_ids_normalized, function(id) file.exists(file.path(trees_dir, id, "aligned_trimmed.fa")))
 
 if (length(query_ids) == 0) {
   cat("## Status\n\n")
@@ -1535,10 +1567,12 @@ if (length(query_ids) == 0) {
   cat("```\n\n")
   cat("Short-region alignment inspection is still available in section 0 under **Junction alignment (focused viewer)**.\n\n")
 } else {
-for (query_id in query_ids) {
+for (i in seq_along(query_ids)) {
+  query_id <- query_ids[i]
+  query_id_norm <- query_ids_normalized[i]
   cat(paste0("\n## ", query_id, "\n\n"))
 
-  tree_dir <- file.path(trees_dir, query_id)
+  tree_dir <- file.path(trees_dir, query_id_norm)
   aln_file <- file.path(tree_dir, "aligned_trimmed.fa")
   treefile <- file.path(tree_dir, "tree.treefile")
   tr <- NULL
@@ -2227,12 +2261,12 @@ n_blast_agree <- sum(summary_tbl$clade_agree_blast == TRUE, na.rm = TRUE)
 ```{r output-files}
 tibble(
   File = c(
-    file.path(params$batch_dir, "output", "blast_results.tsv"),
-    file.path(params$batch_dir, "output", "lineages", "nextclade.tsv"),
-    file.path(params$batch_dir, "output", "trees", "<seqName>", "tree.treefile"),
-    file.path(params$batch_dir, "output", "trees", "<seqName>", "aligned_trimmed.fa"),
-    file.path(params$batch_dir, "output", "summary.tsv"),
-    file.path(params$batch_dir, "output", "comparison.tsv")
+    file.path(params$out_base, "blast_results.tsv"),
+    file.path(params$out_base, "lineages", "nextclade.tsv"),
+    file.path(params$out_base, "trees", "<seqName>", "tree.treefile"),
+    file.path(params$out_base, "trees", "<seqName>", "aligned_trimmed.fa"),
+    file.path(params$out_base, "summary.tsv"),
+    file.path(params$out_base, "comparison.tsv")
   ),
   Description = c(
     "BLAST hits vs local HAV database",
@@ -2249,7 +2283,7 @@ tibble(
 
 ```{r write-outputs}
 # Write summary TSV
-write_tsv(summary_tbl, file.path(out_dir, "summary.tsv"))
+write_tsv(summary_tbl, file.path(params$out_base, "summary.tsv"))
 
 # Write comparison TSV
 clade_comp_out <- clade_comp %>%
@@ -2258,8 +2292,8 @@ clade_comp_out <- clade_comp %>%
 write_tsv(clade_comp_out, file.path(out_dir, "comparison.tsv"))
 ```
 
-*Summary written to `r file.path(params$batch_dir, "output", "summary.tsv")`*  
-*Comparison written to `r file.path(params$batch_dir, "output", "comparison.tsv")`*
+*Summary written to `r file.path(params$out_base, "summary.tsv")`*  
+*Comparison written to `r file.path(params$out_base, "comparison.tsv")`*
 
 ---
 
