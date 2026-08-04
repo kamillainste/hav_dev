@@ -230,8 +230,10 @@ PYEOF
 QUERY_IDS=()                          # Initialiserer tom array
 while IFS= read -r line; do           # Les hver linje fra FASTA-filen
   [[ "$line" == ">"* ]] && {
-    # Fjern ">" og trim ALL whitespace including newlines/carriage returns
+    # Fjern ">" and strip ALL whitespace including newlines/carriage returns
     id="${line#>}"
+    # Strip carriage returns first, then whitespace
+    id="${id%$'\r'}"
     id=$(echo "$id" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     QUERY_IDS+=("$id")
   }
@@ -285,11 +287,16 @@ for QUERY in "${QUERY_IDS[@]}"; do
   # Extract query sequence by exact FASTA header text from batch FASTA.  
   # BLAST truncates headers at whitespace, so we must match on the full header line, not just the query ID.
   # seqkit name matching truncates at whitespace for many FASTA styles.
+  # Strip carriage returns to handle Windows line endings.
   QUERY_FA="$SEQ_DIR/query.fa"
   awk -v q="$QUERY" '
     BEGIN {keep=0}
     /^>/ {
-      keep = (substr($0,2) == q)
+      header = substr($0,2)
+      # Strip trailing carriage returns and whitespace to handle Windows line endings
+      gsub(/\r$/, "", header)
+      gsub(/[[:space:]]*$/, "", header)
+      keep = (header == q)
     }
     keep {print}
   ' "$BATCH_FA" > "$QUERY_FA"
