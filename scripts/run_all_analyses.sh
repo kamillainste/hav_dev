@@ -214,6 +214,7 @@ echo "▶ Step 1/2: BLAST"
 echo "─────────────────────────────────────────────────────────────────"
 
 # blast_batch.sh writes directly to OUT_BASE
+# Pass arguments directly to preserve spaces in paths
 bash scripts/blast_batch.sh "$ANALYSIS_FA" "$DATASET_DATE" "$DATASET_DIR" "$OUT_BASE"
 echo ""
 
@@ -227,7 +228,7 @@ if [[ ! -d "$LINEAGES_DATASET" ]]; then
   echo "ERROR: Lineages dataset not found at $LINEAGES_DATASET" >&2
   exit 1
 fi
-
+# Pass arguments directly to preserve spaces in paths
 nextclade run \
   --input-dataset    "$LINEAGES_DATASET" \
   --alignment-preset high-diversity \
@@ -244,6 +245,7 @@ echo ""
 # ── Analysis 3: Per-sequence trees ────────────────────────────────────────────
 echo "▶ Step 3/3: Per-sequence trees (IQ-TREE with nearest neighbors)"
 echo "─────────────────────────────────────────────────────────────────"
+# Pass arguments directly to preserve spaces in paths
 bash scripts/build_per_seq_trees.sh "$BATCH_DIR" "$DATASET_DATE" 30 "$OUT_BASE" "$DATASET_DIR" "$BATCH_FA"
 echo "  Results → $OUT_BASE/trees/"
 echo ""
@@ -253,7 +255,7 @@ echo "▶ Step 4/4: Generate batch report (HTML)"
 echo "─────────────────────────────────────────────────────────────────"
 
 REPORT_OUTPUT="$OUT_BASE/batch_report.html"
-
+# Pass arguments directly to preserve spaces in paths
 "$HOME/.conda/R_shared/bin/Rscript" -e "
 rmarkdown::render(
   'scripts/batch_report.Rmd',
