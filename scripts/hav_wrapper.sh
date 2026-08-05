@@ -4,16 +4,16 @@
 # Master wrapper for the HAV batch analysis pipeline.
 #
 # Usage (from project root, HAVDEV conda active):
-#   bash scripts/hav_wrapper.sh --mode <sanger|wgs> <batch_dir> [OPTIONS]
+#   bash scripts/hav_wrapper.sh --mode <sanger|wgs> <batch_name> [OPTIONS]
 #
 # Modes:
 #   sanger   Short-fragment Sanger sequences (VP1/2A or VP1/2B junction)
 #   wgs      Whole-genome Nanopore tiling-PCR sequences (requires ViroConstrictor)
 #
-# Positional argument:
-#   <batch_dir>   Output directory for this batch, relative to project root
-#                 Sanger example: data/Batch-1
-#                 WGS example:    data/HAV-2026_01
+# Required argument:
+#   <batch_name>  Name of this batch
+#                 Sanger example: HAGEN1-0706-1
+#                 WGS example:    xxxx
 #
 # Required for both modes:
 #   --samplesheet <path>    TSV with columns Sample and InputDir.
@@ -82,14 +82,14 @@ echo $BATCH_DIR
 usage() {
   cat <<'USAGE'
 Usage:
-  bash scripts/hav_wrapper.sh --mode <sanger|wgs> <batch_dir> [OPTIONS]
+  bash scripts/hav_wrapper.sh --mode <sanger|wgs> <batch_name> [OPTIONS]
 
 Modes:
   sanger   Short-fragment Sanger sequences (VP1/2A or VP1/2B junction)
   wgs      Whole-genome Nanopore tiling-PCR sequences
 
-Positional:
-  <batch_dir>              Batch directory relative to project root
+Required argument:
+  <batch_name>             Name of this batch
 
 Common options:
   --dataset-date <date>    Dataset version (default: 2026-04-10)
