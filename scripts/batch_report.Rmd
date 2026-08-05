@@ -16,6 +16,7 @@ params:
   dataset_dir:  "data/local_datasets/2026-04-10"
   out_base:     "data/Batch-1/output"
   n_neighbors:  30
+  mode:         "sanger"
   zoom_count: 5
   zoom_width: 35
   min_called_fraction: 0.5
@@ -41,6 +42,7 @@ suppressPackageStartupMessages({
   library(patchwork)
   library(jsonlite)
   library(pheatmap)
+  library(grid)
 })
 
 # ── Paths ────────────────────────────────────────────────────────────────────
@@ -67,6 +69,36 @@ safe_csv_sc <- function(path, ...) {
   # NextClade CSV uses semicolons
   if (!file.exists(path)) return(tibble())
   read_delim(path, delim = ";", show_col_types = FALSE, ...)
+}
+
+# Safe FASTA reader with validation (prevents ape::read.dna segfault)
+safe_read_dna_fasta <- function(path) {
+  # Check file existence
+  if (!file.exists(path)) return(NULL)
+  
+  # Check file size (empty file would cause problems)
+  if (file.size(path) == 0) return(NULL)
+  
+  # Quick validation: first line should be a header starting with '>'
+  first_line <- readLines(path, n = 1)
+  if (length(first_line) == 0 || !grepl("^>", first_line)) {
+    warning("Invalid FASTA file (no valid header): ", path)
+    return(NULL)
+  }
+  
+  # Count sequences by counting '>' lines
+  all_lines <- readLines(path)
+  n_seqs <- sum(grepl("^>", all_lines))
+  if (n_seqs < 1) return(NULL)
+  
+  # Try to read with ape::read.dna, but catch errors
+  # (tryCatch won't catch segfaults, but at least we tried validation)
+  tryCatch({
+    ape::read.dna(path, format = "fasta", as.character = TRUE)
+  }, error = function(e) {
+    warning("Error reading FASTA file: ", path, " - ", e$message)
+    NULL
+  })
 }
 
 # Null-coalescing helper (used in parse_nearest)
@@ -223,6 +255,22 @@ genotype_from_name <- function(x) {
 
 # NextClade — lineages dataset (clade + lineage_phylo)
 nc_lineages_raw <- safe_tsv(file.path(out_dir, "lineages", "nextclade.tsv"))
+
+# ── Check for NextClade alignment failures ──────────────────────────────────
+nc_errors <- tibble()
+if (nrow(nc_lineages_raw) > 0 && "errors" %in% names(nc_lineages_raw)) {
+  nc_errors <- nc_lineages_raw %>%
+    filter(!is.na(errors) & errors != "") %>%
+    select(seqName, errors)
+  if (nrow(nc_errors) > 0) {
+    warning(
+      "NextClade alignment failed for ", nrow(nc_errors), " sequence(s).\n",
+      "This usually means sequences are too short or don't match the reference dataset.\n",
+      "Try running with --min-match-length 10 or lower (default is 10)."
+    )
+  }
+}
+
 nc_lineages <- nc_lineages_raw
 if (nrow(nc_lineages) > 0) {
   if (!"lineage_phylo" %in% names(nc_lineages)) {
@@ -240,7 +288,9 @@ if (nrow(nc_lineages) > 0) {
       substitutions,
       aaSubstitutions,
       privateNucMuts_total = privateNucMutations.totalPrivateSubstitutions
-    )
+    ) %>%
+    # Ensure coverage is numeric (NextClade may return FALSE for failed alignments)
+    mutate(coverage = as.numeric(coverage))
 } else {
   nc_lineages <- tibble(
     seqName = character(), clade = character(), lineage_phylo = character(),
@@ -292,15 +342,20 @@ blast_best <- blast_top %>%
          blast_mismatch  = mismatch,
          blast_qcovs     = qcovs,
          blast_bitscore  = bitscore,
-         blast_lineage   = any_of("hit_lineage"),
-         blast_genotype  = any_of("hit_genotype")) %>%
-  # Some references encode the genotype in their name (e.g. "helgenom_gt_1a" →
-  # IA) but carry no genotype in the metadata. Fall back to the name-derived
-  # genotype, then harmonise every label to canonical uppercase (Ib → IB).
+         any_of(c("hit_lineage", "hit_genotype")))
+
+# Ensure hit_lineage and hit_genotype columns exist
+if (!"hit_lineage" %in% names(blast_best)) blast_best$hit_lineage <- NA_character_
+if (!"hit_genotype" %in% names(blast_best)) blast_best$hit_genotype <- NA_character_
+
+# Harmonise and rename
+blast_best <- blast_best %>%
   mutate(
-    blast_genotype = coalesce(harmonise_genotype(blast_genotype),
-                              genotype_from_name(sseqid))
-  )
+    blast_lineage  = hit_lineage,
+    blast_genotype = coalesce(as.character(harmonise_genotype(hit_genotype)),
+                              as.character(genotype_from_name(sseqid)))
+  ) %>%
+  select(-any_of(c("hit_lineage", "hit_genotype")))
 
 # ── Master summary table ──────────────────────────────────────────────────────
 # BLAST truncates FASTA headers at the first whitespace, so its qseqid is only
@@ -671,13 +726,7 @@ coverage_map_plot <- ggplot() +
 
 # ── Junction-focused alignment view (from Nextclade) ───────────────────────
 junction_aln_path <- file.path(out_dir, "lineages", "nextclade.aligned.fasta")
-junction_aln <- tryCatch({
-  if (file.exists(junction_aln_path)) {
-    ape::read.dna(junction_aln_path, format = "fasta", as.character = TRUE)
-  } else {
-    NULL
-  }
-}, error = function(e) NULL)
+junction_aln <- safe_read_dna_fasta(junction_aln_path)
 
 junction_is_usable <- !is.null(junction_aln) && nrow(junction_aln) >= 2
 
@@ -1188,7 +1237,7 @@ if (has_amplicon && nrow(amplicon_long) > 0) {
 ```{r summary-table}
 summary_tbl %>%
   mutate(
-    coverage       = if_else(!is.na(coverage),     percent(coverage, 0.1),              "—"),
+    coverage       = if_else(!is.na(coverage) & is.numeric(coverage), percent(coverage, 0.1), "—"),
     blast_pident   = if_else(!is.na(blast_pident),   paste0(round(blast_pident, 1), "%"), "—"),
     blast_mismatch = if_else(!is.na(blast_mismatch), as.character(blast_mismatch),        "—"),
     blast_qcovs    = if_else(!is.na(blast_qcovs),    paste0(blast_qcovs, "%"),           "—"),
@@ -1200,18 +1249,38 @@ summary_tbl %>%
   select(
     Sequence          = seqName,
     `Clade`           = clade,
-    `lineage_phylo`   = lineage_phylo,
+    `Lineage (phylo)` = lineage_phylo,
     `NC QC`           = qc_status,
     `BLAST top hit`   = sseqid,
     `BLAST %id`       = blast_pident,
     `BLAST SNPs`      = blast_mismatch,
     `BLAST qcov%`     = blast_qcovs,
     `BLAST lineage`   = blast_lineage
-  ) %>%
+  ) -> summary_display
+
+# Calculate background colors for BLAST SNPs column (7th column)
+snp_colors <- summary_display$`BLAST SNPs` %>%
+  map_chr(~ {
+    if (. == "—") {
+      ""  # Empty string for no background
+    } else {
+      snp_count <- as.numeric(.)
+      if (snp_count == 0) {
+        "#c8e6c9"  # Light green for 0 SNPs
+      } else if (snp_count <= 2) {
+        "#fff9c4"  # Light yellow for 1-2 SNPs
+      } else {
+        ""  # Empty string for no background
+      }
+    }
+  })
+
+summary_display %>%
   kbl(escape = FALSE) %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = TRUE) %>%
   column_spec(2, bold = TRUE) %>%
-  column_spec(3, bold = TRUE, color = "#1a6bb5")
+  column_spec(3, bold = TRUE, color = "#1a6bb5") %>%
+  column_spec(7, bold = TRUE, background = snp_colors)
 ```
 
 ---
@@ -1700,13 +1769,28 @@ for (i in seq_along(query_ids)) {
         lineage       = coalesce(lineage, community_clade),
         lineage_phylo = if_else(is.na(lineage_phylo) | lineage_phylo == "",
                                 NA_character_, lineage_phylo),
+        # Shorten long FASTA headers: extract accession + isolate/strain name
+        # Handles both "isolate XXXX" and "strain: XXXX" formats
+        # E.g., "KX151409.1 Hepatovirus A isolate h737 ..." → "KX151409.1 (h737)"
+        # E.g., "LC035017.1 Hepatitis A virus gene for polyprotein, partial cds, strain: 1404-20055-WakymC-4HA42" → "LC035017.1 (1404-20055-WakymC-4HA42)"
+        short_id = {
+          accession <- str_extract(id, "^[^\\s]+")
+          # Extract isolate/strain name: try "isolate" pattern, then "strain:" pattern
+          isolate_m1 <- str_extract(id, "(?<= isolate )[^ ,]+")
+          isolate_m2 <- str_extract(id, "(?<=strain: )[^ ,]+")
+          isolate_part <- coalesce(isolate_m1, isolate_m2)
+          
+          if_else(!is.na(isolate_part),
+                 paste0(accession, " (", isolate_part, ")"),
+                 accession)
+        },
         display = case_when(
-          id == query_id ~ paste0(id, "  \u2605"),
+          id == query_id ~ paste0(short_id, "  \u2605"),
           !is.na(lineage_phylo) & !is.na(lineage) & lineage != "NA" ~
-            paste0(id, "  [", lineage, "  /  ", lineage_phylo, "]"),
-          !is.na(lineage_phylo) ~ paste0(id, "  [", lineage_phylo, "]"),
-          !is.na(lineage) & lineage != "NA" ~ paste0(id, "  [", lineage, "]"),
-          TRUE ~ id
+            paste0(short_id, "  [", lineage, "  /  ", lineage_phylo, "]"),
+          !is.na(lineage_phylo) ~ paste0(short_id, "  [", lineage_phylo, "]"),
+          !is.na(lineage) & lineage != "NA" ~ paste0(short_id, "  [", lineage, "]"),
+          TRUE ~ short_id
         )
       )
     lbl_map <- setNames(lbl_tbl$display, lbl_tbl$id)
@@ -1720,31 +1804,60 @@ for (i in seq_along(query_ids)) {
     )
     ann_colors <- list(Type = c(Query = "#d62728", Reference = "#aec7e8"))
 
-    px <- max(8, n_tips * 0.4)
+    # Adaptive sizing: base cell size on number of sequences
+    # Ensures readable labels and numbers even with many sequences
+    cell_size <- if (n_tips <= 10) 60 else if (n_tips <= 20) 45 else 30
+    fontsize_main <- if (n_tips <= 10) 13 else if (n_tips <= 20) 12 else 11
+    fontsize_num <- if (n_tips <= 10) 11 else if (n_tips <= 20) 10 else 9
+    fontsize_row <- if (n_tips <= 15) 12 else 10
+    
+    # Calculate figure size with minimum/maximum constraints
+    px <- min(18, max(10, n_tips * (cell_size / 35)))
+    
+    # Continuous blue palette for all SNP distances
+    color_func <- colorRampPalette(c("#f7fbff", "#deebf7", "#9ecae1", "#3182bd", "#08519c", "#08306b"))(100)
+    
     .tmp_heat <- tempfile(fileext = ".png")
     .ph_obj <- pheatmap(
       snp_mat,
-      color            = colorRampPalette(c("#fff5f0", "#fcbba1", "#fc4f30", "#99000d"))(100),
+      # Color palette: continuous blue
+      color            = color_func,
       clustering_distance_rows = as.dist(snp_mat),
       clustering_distance_cols = as.dist(snp_mat),
       clustering_method        = "average",
       display_numbers          = TRUE,
       number_format            = "%d",
-      number_color             = "grey15",
-      fontsize                 = 9,
-      fontsize_number          = 8,
+      number_color             = "black",      # Improved contrast
+      fontsize                 = fontsize_main,
+      fontsize_number          = fontsize_num,
+      fontsize_row             = fontsize_row,
       annotation_row           = ann_row,
       annotation_colors        = ann_colors,
       legend                   = TRUE,
       main                     = paste("Pairwise SNP distances \u2014", query_id),
-      treeheight_row           = 80,
-      treeheight_col           = 80,
-      border_color             = "white",
+      treeheight_row           = 100,
+      treeheight_col           = 100,
+      border_color             = "#cccccc",    # Subtle borders for better separation
+      gaps_row                 = which(rownames(snp_mat) == query_lbl),
+      gaps_col                 = which(colnames(snp_mat) == query_lbl),
       silent                   = TRUE
     )
     ggsave(.tmp_heat, plot = .ph_obj$gtable, width = px, height = px, dpi = 150, limitsize = FALSE)
     .embed_img(.tmp_heat)
     file.remove(.tmp_heat)
+    
+    # Save SNP distance matrix as TSV for external analysis
+    snp_tsv <- file.path(out_dir, "snp_matrices", paste0(query_id, "_snp_distances.tsv"))
+    dir.create(dirname(snp_tsv), showWarnings = FALSE, recursive = TRUE)
+    
+    # Convert matrix to data frame with sequence IDs in first column
+    snp_df <- as.data.frame(snp_mat)
+    snp_df <- tibble::rownames_to_column(snp_df, var = "Sequence_1")
+    names(snp_df)[-1] <- rownames(snp_mat)  # Ensure column names are sequence labels
+    
+    write_tsv(snp_df, snp_tsv)
+    cat("[Download SNP distance matrix](snp_matrices/", query_id, "_snp_distances.tsv)\n\n", sep = "")
+    
     cat("\n\n")
   }
 
@@ -1787,12 +1900,24 @@ for (i in seq_along(query_ids)) {
       mutate(
         lineage_phylo = coalesce(lineage_phylo, community_lineage_phylo),
         lineage       = coalesce(lineage, community_clade),
+        # Shorten long FASTA headers: extract accession + isolate/strain name
+        short_id = {
+          accession <- str_extract(id, "^[^\\s]+")
+          # Extract isolate/strain name: try "isolate" pattern, then "strain:" pattern
+          isolate_m1 <- str_extract(id, "(?<= isolate )[^ ,]+")
+          isolate_m2 <- str_extract(id, "(?<=strain: )[^ ,]+")
+          isolate_part <- coalesce(isolate_m1, isolate_m2)
+          
+          if_else(!is.na(isolate_part),
+                 paste0(accession, " (", isolate_part, ")"),
+                 accession)
+        },
         display = case_when(
-          id == query_id & !is.na(lineage_phylo) ~ paste0(id, " ★ [", lineage_phylo, "]"),
-          id == query_id ~ paste0(id, " ★"),
-          !is.na(lineage_phylo) ~ paste0(id, " [", lineage_phylo, "]"),
-          !is.na(lineage) ~ paste0(id, " [", lineage, "]"),
-          TRUE ~ id
+          id == query_id & !is.na(lineage_phylo) ~ paste0(short_id, " ★ [", lineage_phylo, "]"),
+          id == query_id ~ paste0(short_id, " ★"),
+          !is.na(lineage_phylo) ~ paste0(short_id, " [", lineage_phylo, "]"),
+          !is.na(lineage) ~ paste0(short_id, " [", lineage, "]"),
+          TRUE ~ short_id
         )
       )
     lbl_map0 <- setNames(lbl_tbl0$display, lbl_tbl0$id)
@@ -1885,12 +2010,24 @@ for (i in seq_along(query_ids)) {
       mutate(
         lineage_phylo = coalesce(lineage_phylo, community_lineage_phylo),
         lineage       = coalesce(lineage, community_clade),
+        # Shorten long FASTA headers: extract accession + isolate/strain name
+        short_id = {
+          accession <- str_extract(id, "^[^\\s]+")
+          # Extract isolate/strain name: try "isolate" pattern, then "strain:" pattern
+          isolate_m1 <- str_extract(id, "(?<= isolate )[^ ,]+")
+          isolate_m2 <- str_extract(id, "(?<=strain: )[^ ,]+")
+          isolate_part <- coalesce(isolate_m1, isolate_m2)
+          
+          if_else(!is.na(isolate_part),
+                 paste0(accession, " (", isolate_part, ")"),
+                 accession)
+        },
         display = case_when(
-          id == query_id & !is.na(lineage_phylo) ~ paste0(id, " ★ [", lineage_phylo, "]"),
-          id == query_id ~ paste0(id, " ★"),
-          !is.na(lineage_phylo) ~ paste0(id, " [", lineage_phylo, "]"),
-          !is.na(lineage) ~ paste0(id, " [", lineage, "]"),
-          TRUE ~ id
+          id == query_id & !is.na(lineage_phylo) ~ paste0(short_id, " ★ [", lineage_phylo, "]"),
+          id == query_id ~ paste0(short_id, " ★"),
+          !is.na(lineage_phylo) ~ paste0(short_id, " [", lineage_phylo, "]"),
+          !is.na(lineage) ~ paste0(short_id, " [", lineage, "]"),
+          TRUE ~ short_id
         )
       )
     lbl_map <- setNames(label_tbl$display, label_tbl$id)
@@ -2265,6 +2402,7 @@ tibble(
     file.path(params$out_base, "lineages", "nextclade.tsv"),
     file.path(params$out_base, "trees", "<seqName>", "tree.treefile"),
     file.path(params$out_base, "trees", "<seqName>", "aligned_trimmed.fa"),
+    file.path(params$out_base, "snp_matrices", "<seqName>_snp_distances.tsv"),
     file.path(params$out_base, "summary.tsv"),
     file.path(params$out_base, "comparison.tsv")
   ),
@@ -2273,6 +2411,7 @@ tibble(
     "NextClade: lineages dataset (clade + lineage_phylo)",
     "IQ-TREE ML tree per query sequence",
     "MAFFT alignment used for each tree",
+    "Pairwise SNP distance matrix per query sequence (TSV format for external analysis)",
     "Per-sequence summary table (this report, TSV)",
     "Clade comparison table (this report, TSV)"
   )
