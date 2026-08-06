@@ -1,12 +1,15 @@
 #!/usr/bin/env Rscript
 #
-# Reads a samplesheet TSV and collects one consensus sequence per sample
-# into a single multi-FASTA output file.
+# Reads a samplesheet TSV (Sample column only) and collects one consensus
+# sequence per sample from a specified FASTA directory into a single
+# multi-FASTA output file.
 #
 # Samplesheet format (TSV, header required):
-#   Sample    — sequence ID used in the output FASTA header
-#   InputDir  — directory containing the consensus file for that sample
-#               (.fa, .fasta, or .TXT; first match is used)
+#   Sample — sequence ID used in the output FASTA header
+#            (InputDir column no longer required)
+#
+# FASTA directory: contains .fa, .fasta, or .TXT files for each sample.
+#                  Files are matched by sample name (wildcard search).
 #
 # For .TXT files (raw Sanger contig text): all lines are concatenated
 # as sequence.
@@ -14,7 +17,7 @@
 #   column overrides whatever header is in the file.
 #
 # Usage:
-#   Rscript scripts/prepare_input_fasta.R <samplesheet.tsv> <output.fa>
+#   Rscript scripts/prepare_input_fasta.R <fasta_dir> <samplesheet.tsv> <output.fasta>
 
 suppressPackageStartupMessages({
   library(readr)
@@ -24,15 +27,29 @@ suppressPackageStartupMessages({
 
 args <- commandArgs(trailingOnly = TRUE)
 
-if (length(args) < 2) {
+if (length(args) < 3) {
   stop(
-    "Usage: Rscript scripts/prepare_input_fasta.R <samplesheet.tsv> <output.fa>",
+    "Usage: Rscript scripts/prepare_input_fasta.R <fasta_dir> <samplesheet.tsv> <output.fasta>",
     call. = FALSE
   )
 }
 
-samplesheet_path <- args[1]
-output_fa        <- args[2]
+fasta_dir        <- args[1]
+samplesheet_path <- args[2]
+output_fa        <- args[3]
+
+# Ensure output file has .fasta extension
+if (!grepl("\\.fasta$", output_fa)) {
+  output_fa <- sub("\\.fa$|\\.txt$", ".fasta", output_fa, ignore.case = TRUE)
+  if (!grepl("\\.fasta$", output_fa)) {
+    output_fa <- paste0(output_fa, ".fasta")
+  }
+}
+
+# ── Validate FASTA directory ──────────────────────────────────────────────────
+if (!dir.exists(fasta_dir)) {
+  stop("FASTA directory not found: ", fasta_dir, call. = FALSE)
+}
 
 # ── Read & validate samplesheet ───────────────────────────────────────────────
 if (!file.exists(samplesheet_path)) {
@@ -41,15 +58,11 @@ if (!file.exists(samplesheet_path)) {
 
 df <- read_tsv(samplesheet_path, show_col_types = FALSE)
 
-required_cols <- c("Sample", "InputDir")
-missing_cols  <- setdiff(required_cols, colnames(df))
-if (length(missing_cols) > 0) {
-  stop("Samplesheet missing required columns: ",
-       paste(missing_cols, collapse = ", "), call. = FALSE)
+if (!"Sample" %in% colnames(df)) {
+  stop("Samplesheet missing required column: Sample", call. = FALSE)
 }
 
-df$Sample   <- trimws(df$Sample)
-df$InputDir <- trimws(df$InputDir)
+df$Sample <- trimws(df$Sample)
 
 if (any(is.na(df$Sample) | df$Sample == "")) {
   stop("Empty Sample values detected in samplesheet", call. = FALSE)
@@ -64,17 +77,13 @@ message("Samples: ", nrow(df))
 # ── Read one sequence per sample ──────────────────────────────────────────────
 # Returns list(name, seq) or stops with an informative error.
 read_sample_seq <- function(sample_name, input_dir) {
-  if (!dir.exists(input_dir)) {
-    stop("InputDir not found for sample '", sample_name, "': ", input_dir,
-         call. = FALSE)
-  }
-
   # First token only in FASTA headers (tools truncate at whitespace)
   clean_name <- str_replace(sample_name, "\\s+.*$", "")
 
-  txt_files   <- list.files(input_dir, pattern = "\\.TXT$",
+  # Look for files matching sample name: .TXT > .fasta > .fa
+  txt_files   <- list.files(input_dir, pattern = paste0("^", sample_name, ".*\\.TXT$"),
                             full.names = TRUE, ignore.case = FALSE)
-  fasta_files <- list.files(input_dir, pattern = "\\.(fa|fasta)$",
+  fasta_files <- list.files(input_dir, pattern = paste0("^", sample_name, ".*\\.(fa|fasta)$"),
                             full.names = TRUE, ignore.case = TRUE)
 
   if (length(txt_files) > 0) {
@@ -98,17 +107,18 @@ read_sample_seq <- function(sample_name, input_dir) {
     return(list(name = clean_name, seq = as.character(seqs[[1]])))
   }
 
-  stop("No .fa, .fasta, or .TXT file found in InputDir for sample '",
-       sample_name, "': ", input_dir, call. = FALSE)
+  stop("No .fa, .fasta, or .TXT file found for sample '",
+       sample_name, "' in: ", input_dir, call. = FALSE)
 }
 
 all_seqs <- vector("list", nrow(df))
 for (i in seq_len(nrow(df))) {
-  all_seqs[[i]] <- read_sample_seq(df$Sample[i], df$InputDir[i])
+  all_seqs[[i]] <- read_sample_seq(df$Sample[i], fasta_dir)
 }
 
 # ── Write multi-FASTA ─────────────────────────────────────────────────────────
 out_dir <- dirname(output_fa)
+if (out_dir == "") out_dir <- "."
 if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
 
 fasta_lines <- unlist(lapply(
