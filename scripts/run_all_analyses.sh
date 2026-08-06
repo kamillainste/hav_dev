@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # scripts/run_all_analyses.sh
 #
-# Unified wrapper: runs all four HAV analyses on a batch.
+# Unified wrapper: runs BLAST + NextClade analyses on a batch and builds per-sequence phylogenetic trees.
 #
-# Usage (from project root, HAVDEV conda active):
-#   bash scripts/run_all_analyses.sh <batch_dir> [dataset_date] [options]
+# Called by hav_wrapper.sh with:
+#   bash scripts/run_all_analyses.sh <batch_dir> <dataset_date> <batch_fa> <dataset_dir> <out_base> <year> [options]
 #
-# Example:
-#   bash scripts/run_all_analyses.sh data/Batch-1 2026-04-10
-#   bash scripts/run_all_analyses.sh data/Batch-1 2026-04-10 \
-#     --sanger --primer-names "HAV_6.1_codehop,HAV_10_codehop,HAV_8.2_codehop,HAV_11_codehop"
+# Arguments:
+#   <batch_dir>     Batch directory path
+#   <dataset_date>  Dataset version date (e.g., 2026-04-10)
+#   <batch_fa>      Path to batch FASTA file
+#   <dataset_dir>   Path to local_datasets/<dataset_date> directory
+#   <out_base>      Output base directory for results
+#   <year>          Year folder (for context)
+#   [options]       Optional flags (see below)
 #
 # Optional Sanger-specific options:
 #   --sanger                       Enable primer trimming pre-step
@@ -25,16 +29,17 @@
 #   1. BLAST     — batch sequences vs the local HAV BLAST database
 #                  (closest-match / genotype confirmation)
 #   2. NextClade — against the public-derived hav-vp1-2b-lineages dataset
-#                  (assigns genotype `clade` + `lineage_phylo`)
+#                  (assigns genotype `clade` + lineage information)
 #   3. Per-sequence trees — builds IQ-TREE phylogenetic trees for each query
 #                  (using nearest neighbors from BLAST and NextClade)
 #   4. Batch report — generates interactive HTML report with visualizations
 #
-# Writes:
-#   <batch_dir>/output/blast_results.tsv
-#   <batch_dir>/output/lineages/nextclade.tsv   (+ aligned fasta, json, ndjson)
-#   <batch_dir>/output/trees/<seqName>/*        (neighbor lists, alignments, trees)
-#   <batch_dir>/output/batch_report.html        (interactive report with trees + plots)
+# Writes to <out_base>/:
+#   blast_results.tsv
+#   lineages/nextclade.tsv  (+ aligned fasta, json, ndjson)
+#   lineages/nextclade.auspice.json
+#   trees/<seqName>/*  (per-sequence tree artifacts)
+#   batch_report.html  (interactive HTML report)
 #
 # Prerequisites:
 #   - BLAST database built:   bash scripts/make_blast_db.sh [dataset_date]
@@ -46,9 +51,17 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  bash scripts/run_all_analyses.sh <batch_dir> [dataset_date] [options]
+  bash scripts/run_all_analyses.sh <batch_dir> <dataset_date> <batch_fa> <dataset_dir> <out_base> <year> [options]
 
-Options:
+Required arguments:
+  <batch_dir>      Batch directory path
+  <dataset_date>   Dataset date (e.g., 2026-04-10)
+  <batch_fa>       Path to batch FASTA file
+  <dataset_dir>    Path to local_datasets/<date>
+  <out_base>       Output base directory
+  <year>           Year folder
+
+Optional flags:
   --sanger                       Enable Sanger primer trimming pre-step
   --primer-names <csv>           Comma-separated primer names
   --primers-file <path>          Optional custom primer file (FASTA/CSV/TSV)
@@ -56,7 +69,7 @@ Options:
   --resolved-primers-tsv <path>  Optional resolved primer coordinate TSV path
   --min-match-length <int>       Minimum seed match length for NextClade (default: 20)
 USAGE
-}
+
 
 if [[ $# -lt 1 ]]; then
   usage
@@ -68,9 +81,10 @@ DATASET_DATE="$2"
 BATCH_FA="$3"
 DATASET_DIR="$4"
 OUT_BASE="$5"
+YEAR="$6"
 
-# Skip the 5 positional arguments before processing flags
-shift 5
+# Skip the 6 positional arguments before processing flags
+shift 6
 
 IS_SANGER=0
 PRIMER_NAMES=""
@@ -148,23 +162,17 @@ mkdir -p "$OUT_BASE"
 
 echo "════════════════════════════════════════════════════════════════"
 echo "HAV Batch Analysis: $BATCH_NAME  (dataset: $DATASET_DATE)"
-echo "════════════════════════════════════════════════════════════════"
-echo ""
-
-# Kan slettes når alt er ferdig
-echo "════════════════════════════════════════════════════════════════"
-echo "run_all_analyses.sh – sjekk av variabler før start"
+echo "  Batch     : $BATCH_NAME"
+echo "  Year      : $YEAR"
+echo "  Batch Dir       : $BATCH_DIR"
 echo "  Dataset   : $DATASET_DATE"
 echo "  Threads   : $THREADS"
-echo "  BATCH_DIR : $BATCH_DIR"
-ls "$BATCH_DIR"
-echo "  BATCH_FA  : $BATCH_FA"
-echo "  OUT_BASE  : $OUT_BASE"
-echo "  DATASET_DIR : $DATASET_DIR"
-ls "$DATASET_DIR"
-echo "  PRIMER_NAMES : $PRIMER_NAMES"
-echo "  PRIMERS_FILE : $PRIMERS_FILE" 
+echo "  Output    : $OUT_BASE"
+echo "  Lineages dataset : $LINEAGES_DATASET"
+echo "  Primer names : $PRIMER_NAMES"
+echo "  Primers file : $PRIMERS_FILE"
 echo "════════════════════════════════════════════════════════════════"
+echo ""
 
 
 # ── Optional pre-step: coordinate-based primer trimming ──────────────────────
