@@ -87,23 +87,6 @@ if ! command -v blastn &> /dev/null; then
     exit 1
 fi
 
-# Kan slettes når alt er ferdig
-echo "════════════════════════════════════════════════════════════════"
-echo "blast_batch.sh – sjekk av variabler før start"
-echo "  Dataset   : $DATASET_DATE"
-echo "  Threads   : $THREADS"
-#echo "  BATCH_DIR : $BATCH_DIR"
-#ls "$BATCH_DIR"
-echo "  BATCH_FA  : $BATCH_FA"
-ls "$BATCH_FA"
-echo "  OUT_BASE  : $OUT_BASE"
-echo "  DATASET_DIR : $DATASET_DIR"
-ls "$DATASET_DIR"
-echo "  DB_PATH : $DB_PATH"
-ls "${DB_PATH}".*
-echo "════════════════════════════════════════════════════════════════"
-
-
 
 # ── Run BLAST ─────────────────────────────────────────────────────────────────
 echo "── Running blastn ────────────────────────────────────────────────────────"
