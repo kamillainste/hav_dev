@@ -4,23 +4,22 @@
 # Master wrapper for the HAV batch analysis pipeline.
 #
 # Usage (from project root, HAVDEV conda active):
-#   bash scripts/hav_wrapper.sh --mode <sanger|wgs> <batch_name> [OPTIONS]
+#   bash scripts/hav_wrapper.sh --mode <sanger|wgs> <batch_name> <year> [OPTIONS]
 #
 # Modes:
 #   sanger   Short-fragment Sanger sequences (VP1/2A or VP1/2B junction)
 #   wgs      Whole-genome Nanopore tiling-PCR sequences (requires ViroConstrictor)
 #
-# Required argument:
-#   <batch_name>  Name of this batch
-#                 Sanger example: HAGEN1-0706-1
-#                 WGS example:    xxxx
+# Required arguments:
+#   <batch_name>  Name of this batch (e.g., HAGEN1-0706-1 or HAV-2026_01)
+#   <year>        Year folder where batch is stored
 #
 # Required for both modes:
-#   --samplesheet <path>    TSV with columns Sample and InputDir.
-#                           Sanger: InputDir = dir containing .fa/.fasta/.TXT
-#                           WGS:    InputDir = dir containing raw FASTQ files
-#                                   (also needs ViroConstrictor columns; see
-#                                    data/HAV-2026_01/samplesheet.tsv as example)
+#   --samplesheet <path>    TSV with columns:
+#                           Sanger: Sample column only
+#                                   (FASTA directory inferred from batch location)
+#                           WGS:    Sample, Virus, MatchRef, Segmented, Primers,
+#                                   Reference, Features, MinCov, Mismatch, InputDir
 #
 # Common options:
 #   --dataset-date <date>   Local dataset version to use (default: 2026-04-10)
@@ -40,14 +39,14 @@
 #
 # Workflow steps by mode:
 #   sanger:
-#     1. prepare_input_fasta.R   — samplesheet → <batch>.fa
+#     1. prepare_input_fasta.R   — fasta_dir + samplesheet → <batch>.fasta
 #     2. run_all_analyses.sh     — BLAST + NextClade (with optional primer trim)
 #     3. build_per_seq_trees.sh  — per-sequence ML trees
 #     4. batch_report.Rmd        — HTML report
 #
 #   wgs:
 #     1. run_pipeline.sh         — NanoPlot QC + Chopper + ViroConstrictor assembly
-#     2. collect consensus        — ViroConstrictor all_consensus.fasta → <batch>.fa
+#     2. collect consensus        — ViroConstrictor all_consensus.fasta → <batch>.fasta
 #     3. run_all_analyses.sh     — BLAST + NextClade
 #     4. build_per_seq_trees.sh  — per-sequence ML trees
 #     5. batch_report.Rmd        — HTML report
@@ -71,18 +70,17 @@ DEFAULT_THREADS=4
 DEFAULT_N_NEIGHBORS=30
 BATCH_DIR="/mnt/n/Virologi/Hepatitt/Hepatitt A/HAV genteknologi"
 FASTA_DIR="Fasta"
-YEAR=$(date +%Y)
 
-echo $RSCRIPT 
-echo $DEFAULT_DATASET_DATE
-echo $FASTA_DIR
-echo $BATCH_DIR
+#echo $RSCRIPT 
+#echo $DEFAULT_DATASET_DATE
+#echo $FASTA_DIR
+#echo $BATCH_DIR
 
 # ── Usage ─────────────────────────────────────────────────────────────────────
 usage() {
   cat <<'USAGE'
 Usage:
-  bash scripts/hav_wrapper.sh --mode <sanger|wgs> <batch_name> [OPTIONS]
+  bash scripts/hav_wrapper.sh --mode <sanger|wgs> <batch_name> <year> [OPTIONS]
 
 Modes:
   sanger   Short-fragment Sanger sequences (VP1/2A or VP1/2B junction)
@@ -90,6 +88,7 @@ Modes:
 
 Required argument:
   <batch_name>             Name of this batch
+  <year>                   Year of this batch 
 
 Common options:
   --dataset-date <date>    Dataset version (default: 2026-04-10)
@@ -134,7 +133,7 @@ USAGE
 # ── Argument parsing ──────────────────────────────────────────────────────────
 MODE=""
 BATCH_NAME=""
-#BATCH_DIR=""
+YEAR=""
 DATASET_DATE="$DEFAULT_DATASET_DATE"
 THREADS="$DEFAULT_THREADS"
 N_NEIGHBORS="$DEFAULT_N_NEIGHBORS"
@@ -144,6 +143,7 @@ PRIMER_NAMES=""
 PRIMERS_FILE=""
 SAMPLESHEET=""
 SKIP_ASSEMBLY=0
+BATCH_FA=""
 
 POSITIONAL=()
 while [[ $# -gt 0 ]]; do
@@ -185,45 +185,45 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ ${#POSITIONAL[@]} -ge 1 ]] && BATCH_NAME="${POSITIONAL[0]}"
+[[ ${#POSITIONAL[@]} -ge 2 ]] && YEAR="${POSITIONAL[1]}"
 
-echo MODE: $MODE
-echo YEAR: $YEAR
-echo BATCH_NAME: $BATCH_NAME
-echo BATCH_DIR: $BATCH_DIR
+#echo MODE: $MODE
+#echo YEAR: $YEAR
+#echo BATCH_NAME: $BATCH_NAME
+#echo BATCH_DIR: $BATCH_DIR
 
 # ── Resolve paths ─────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-echo SCRIPT_DIR: $SCRIPT_DIR
-echo PROJECT_DIR: $PROJECT_DIR
+#echo SCRIPT_DIR: $SCRIPT_DIR
+#echo PROJECT_DIR: $PROJECT_DIR
 
 BATCH_DIR="$BATCH_DIR/$YEAR/$BATCH_NAME"
-echo BATCH_DIR: $BATCH_DIR
-ls "$BATCH_DIR"
-echo SAMPLESHEET: $SAMPLESHEET
+#echo BATCH_DIR: $BATCH_DIR
+#ls "$BATCH_DIR"
+#echo SAMPLESHEET: $SAMPLESHEET
 SAMPLESHEET_ARRAY=("$BATCH_DIR"/*samplesheet.tsv)
 SAMPLESHEET="${SAMPLESHEET_ARRAY[0]}"
-echo SAMPLESHEET: $SAMPLESHEET
+#echo SAMPLESHEET: $SAMPLESHEET
 
 if [[ ! -f "$SAMPLESHEET" ]]; then
   echo "ERROR: Could not find samplesheet in $BATCH_DIR" >&2
   exit 1
 fi
 
-echo SAMPLESHEET: $SAMPLESHEET
+#echo SAMPLESHEET: $SAMPLESHEET
 
 FASTA_DIR="$BATCH_DIR/Fasta"
-ls "$FASTA_DIR"
-BATCH_FA_ARRAY=("$FASTA_DIR/$BATCH_NAME".fa*)
-BATCH_FA="${BATCH_FA_ARRAY[0]}"
-echo BATCH_FA: $BATCH_FA
+#ls "$FASTA_DIR"
+BATCH_FA="$FASTA_DIR/$BATCH_NAME.fasta"
+#echo BATCH_FA: $BATCH_FA
 
 OUT_BASE="$HOME/output"
-echo OUT_BASE: $OUT_BASE
+#echo OUT_BASE: $OUT_BASE
 
 DATASET_DIR="/mnt/n/Virologi/Hepatitt/Hepatitt A/HAV genteknologi/Databaser/local_datasets/$DATASET_DATE"
-echo DATASET_DIR: $DATASET_DIR
+#echo DATASET_DIR: $DATASET_DIR
 
 cd "$PROJECT_DIR"
 
@@ -289,12 +289,17 @@ step() {
 echo "════════════════════════════════════════════════════════════════"
 echo "HAV Analysis Pipeline"
 echo "  Batch     : $BATCH_NAME"
+echo "  Year      : $YEAR"
+echo "  Batch Dir       : $BATCH_DIR"
+echo "  Batch fasta dir : $FASTA_DIR"
+echo "  Samplesheet     : $SAMPLESHEET"
 echo "  Mode      : $MODE"
 echo "  Dataset   : $DATASET_DATE"
 echo "  Threads   : $THREADS"
 echo "  Neighbors : $N_NEIGHBORS"
 echo "  Started   : $(date)"
 echo "  Log       : $LOGFILE"
+echo "  Output    : $OUT_BASE"
 echo "════════════════════════════════════════════════════════════════"
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -333,38 +338,17 @@ fi
 # ════════════════════════════════════════════════════════════════════════════
 # SANGER BRANCH
 # ════════════════════════════════════════════════════════════════════════════
-#if [[ "$MODE" == "sanger" ]]; then
+if [[ "$MODE" == "sanger" ]]; then
 
-#  step "Sanger 1/1: Prepare batch FASTA from samplesheet"
-#  "$RSCRIPT" scripts/prepare_input_fasta.R "$SAMPLESHEET" "$BATCH_FA"
-#  if [[ ! -f "$BATCH_FA" ]]; then
-#    echo "ERROR: prepare_input_fasta.R completed but $BATCH_FA was not created." >&2
-#    exit 1
-#  fi
+  step "Sanger 1/1: Prepare batch FASTA from samplesheet"
+  "$RSCRIPT" scripts/prepare_input_fasta.R "$FASTA_DIR" "$SAMPLESHEET" "$BATCH_FA"
+  if [[ ! -f "$BATCH_FA" ]]; then
+    echo "ERROR: prepare_input_fasta.R completed but $BATCH_FA was not created." >&2
+    exit 1
+  fi
 
-#fi
-### Må fikse denne delen senere - prøver å komme bort fra å oppgi mappe som fasta ligger i samplesheet 
+fi
 
-# Kan slettes når alt er ferdig
-echo "════════════════════════════════════════════════════════════════"
-echo "hav_wrapper.sh – sjekk av variabler"
-echo "  Batch     : $BATCH_NAME"
-echo "  Mode      : $MODE"
-echo "  Dataset   : $DATASET_DATE"
-echo "  Threads   : $THREADS"
-echo "  Neighbors : $N_NEIGHBORS"
-echo "  Started   : $(date)"
-echo "  Log       : $LOGFILE"
-echo "  BATCH_DIR : $BATCH_DIR"
-ls "$BATCH_DIR"
-echo "  BATCH_FA  : $BATCH_FA"
-echo "  OUT_BASE  : $OUT_BASE"
-echo "  DATASET_DIR : $DATASET_DIR"
-ls "$DATASET_DIR"
-echo "  SAMPLESHEET : $SAMPLESHEET"
-echo "  PRIMER_NAMES : $PRIMER_NAMES"
-echo "  PRIMERS_FILE : $PRIMERS_FILE" 
-echo "════════════════════════════════════════════════════════════════"
 
 # ════════════════════════════════════════════════════════════════════════════
 # COMMON STEPS — BLAST + NextClade → trees → report
@@ -374,9 +358,6 @@ if [[ ! -f "$BATCH_FA" ]]; then
   exit 1
 fi
 
-# ── BLAST + NextClade ─────────────────────────────────────────────────────────
-step "BLAST + NextClade"
-
 # Build arguments array for optional flags
 OPTIONAL_ARGS=()
 if [[ "$MODE" == "sanger" && -n "$PRIMER_NAMES" ]]; then
@@ -385,5 +366,5 @@ if [[ "$MODE" == "sanger" && -n "$PRIMER_NAMES" ]]; then
 fi
 
 # Pass arguments directly to preserve spaces in paths
-bash scripts/run_all_analyses.sh "$BATCH_DIR" "$DATASET_DATE" "$BATCH_FA" "$DATASET_DIR" "$OUT_BASE" "${OPTIONAL_ARGS[@]}"
+bash scripts/run_all_analyses.sh "$BATCH_DIR" "$DATASET_DATE" "$BATCH_FA" "$DATASET_DIR" "$OUT_BASE" "$YEAR" "${OPTIONAL_ARGS[@]}"
 
