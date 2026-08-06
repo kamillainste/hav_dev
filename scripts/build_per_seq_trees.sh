@@ -6,25 +6,30 @@
 #   - Top BLAST hits (ranked by bitscore)
 #   - Nearest-node sequences from all NextClade runs (nearestNodeName from NDJSON)
 #
-# Usage (from project root, HAVDEV conda active):
-#   bash scripts/build_per_seq_trees.sh <batch_dir> [dataset_date] [n_neighbors] [output_base]
+# Called by run_all_analyses.sh with:
+#   bash scripts/build_per_seq_trees.sh <batch_dir> <dataset_date> <n_neighbors> <out_base> <dataset_dir> <batch_fa>
 #
-# Example:
-#   bash scripts/build_per_seq_trees.sh data/Batch-1 2026-04-10 50
-#   bash scripts/build_per_seq_trees.sh data/Batch-1 2026-04-10 50 data/Batch-1/output
+# Arguments:
+#   <batch_dir>    Batch directory path
+#   <dataset_date> Dataset date (e.g., 2026-04-10)
+#   <n_neighbors>  Number of nearest neighbors to include (default: 30)
+#   <out_base>     Output base directory where results go
+#   <dataset_dir>  Path to local_datasets/<dataset_date>
+#   <batch_fa>     Path to batch FASTA file
 #
-# Writes per sequence to <batch_dir>/output/trees/<seqName>/:
+# Writes per sequence to <out_base>/trees/<seqName>/:
 #   neighbors.txt         — list of reference IDs used
 #   combined.fa           — query + neighbor sequences (unaligned)
 #   aligned.fa            — MAFFT alignment
+#   aligned_trimmed.fa    — MAFFT alignment trimmed to the junction region
 #   tree.treefile         — IQ-TREE best ML tree with bootstrap values
 #   tree.iqtree           — IQ-TREE run summary
 #   tree.log              — IQ-TREE log
 #   tree.contree          — consensus tree
 #
 # Prerequisites:
-#   - run_all_analyses.sh must have been run first
-#   - HAVDEV conda: nextclade, mafft, iqtree (iqtree3), seqkit, python3, jq
+#   - run_all_analyses.sh must have been run first (creates BLAST and NextClade results)
+#   - HAVDEV conda: mafft, iqtree (iqtree3), seqkit, python3, jq
 
 set -euo pipefail
 
@@ -53,21 +58,6 @@ COMMUNITY_SEQS_FA="$LINEAGES_DATASET/community_sequences.fasta"
 THREADS=4
 
 cd "$PROJECT_DIR"
-
-
-# Kan slettes når alt er ferdig
-echo "════════════════════════════════════════════════════════════════"
-echo "build_per_seq_trees.sh – sjekk av variabler før start"
-echo "  Dataset   : $DATASET_DATE"
-echo "  Threads   : $THREADS"
-echo "  BATCH_DIR : $BATCH_DIR"
-ls "$BATCH_DIR"
-echo "  BATCH_FA  : $BATCH_FA"
-echo "  OUT_BASE  : $OUT_BASE"
-echo "  DATASET_DIR : $DATASET_DIR"
-ls "$DATASET_DIR"
-
-echo "════════════════════════════════════════════════════════════════"
 
 
 # ── Validation ────────────────────────────────────────────────────────────────
