@@ -69,6 +69,7 @@ Optional flags:
   --resolved-primers-tsv <path>  Optional resolved primer coordinate TSV path
   --min-match-length <int>       Minimum seed match length for NextClade (default: 20)
 USAGE
+}
 
 
 if [[ $# -lt 1 ]]; then
