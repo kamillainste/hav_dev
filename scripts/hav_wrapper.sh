@@ -15,9 +15,9 @@
 #   <year>        Year folder where batch is stored
 #
 # Required for both modes:
-#   --samplesheet <path>    TSV with columns:
-#                           Sanger: Sample column only
-#                                   (FASTA directory inferred from batch location)
+#   --samplesheet <file>    TSV with columns:
+#                           Sanger: Sample, LabWareID (auto-generated if not provided;
+#                                   file names must be: LabWareID_SekvensID-HAV.fa(sta))
 #                           WGS:    Sample, Virus, MatchRef, Segmented, Primers,
 #                                   Reference, Features, MinCov, Mismatch, InputDir
 #
@@ -39,6 +39,7 @@
 #
 # Workflow steps by mode:
 #   sanger:
+#     0. generate_samplesheet (auto if --samplesheet not provided)
 #     1. prepare_input_fasta.R   — fasta_dir + samplesheet → <batch>.fasta
 #     2. run_all_analyses.sh     — BLAST + NextClade (with optional primer trim)
 #     3. build_per_seq_trees.sh  — per-sequence ML trees
@@ -99,8 +100,9 @@ Common options:
   -h, --help
 
 Required (both modes):
-  --samplesheet <path>     TSV with Sample + InputDir columns
-                           Sanger: InputDir = dir with .fa/.fasta/.TXT file
+  --samplesheet <path>     TSV with Sample + other columns
+                           Sanger: auto-generated from FASTA filenames if not provided
+                                   Expected format: LabWareID_SekvensID-HAV.fa(sta)
                            WGS:    InputDir = dir with raw FASTQ files
 
 Sanger options:
@@ -111,11 +113,10 @@ WGS options:
   --skip-assembly          Skip ViroConstrictor; batch FASTA must already exist
 
 Examples:
-  # Sanger batch without primer trimming
-  bash scripts/hav_analyse.sh --mode sanger data/Batch-1 \
-    --samplesheet data/Batch-1/samplesheet.tsv
+  # Sanger batch — auto-generate samplesheet from FASTA filenames
+  bash scripts/hav_analyse.sh --mode sanger data/Batch-1
 
-  # Sanger batch with primer trimming
+  # Sanger batch with custom samplesheet and primer trimming
   bash scripts/hav_analyse.sh --mode sanger data/Batch-1 \
     --samplesheet data/Batch-1/samplesheet.tsv \
     --primer-names "HAV_6.1_codehop,HAV_10_codehop,HAV_8.2_codehop,HAV_11_codehop"
@@ -203,13 +204,14 @@ BATCH_DIR="$BATCH_DIR/$YEAR/$BATCH_NAME"
 #echo BATCH_DIR: $BATCH_DIR
 #ls "$BATCH_DIR"
 #echo SAMPLESHEET: $SAMPLESHEET
-SAMPLESHEET_ARRAY=("$BATCH_DIR"/*samplesheet.tsv)
-SAMPLESHEET="${SAMPLESHEET_ARRAY[0]}"
-#echo SAMPLESHEET: $SAMPLESHEET
 
-if [[ ! -f "$SAMPLESHEET" ]]; then
-  echo "ERROR: Could not find samplesheet in $BATCH_DIR" >&2
-  exit 1
+# For Sanger mode, samplesheet will be auto-generated if not provided
+# For WGS mode, it will be validated later
+shopt -s nullglob
+SAMPLESHEET_ARRAY=("$BATCH_DIR"/*samplesheet.tsv)
+shopt -u nullglob
+if [[ ${#SAMPLESHEET_ARRAY[@]} -gt 0 ]]; then
+  SAMPLESHEET="${SAMPLESHEET_ARRAY[0]}"
 fi
 
 #echo SAMPLESHEET: $SAMPLESHEET
@@ -238,10 +240,14 @@ fi
 if [[ -z "$BATCH_DIR" ]]; then
   echo "ERROR: <batch_dir> is required" >&2; usage; exit 1
 fi
-# Samplesheet is required for both modes.
-# The only exception: WGS + --skip-assembly when the batch FASTA already exists.
+# Samplesheet is required for both modes, with exceptions:
+# - WGS + --skip-assembly when the batch FASTA already exists
+# - Sanger: can be auto-generated from FASTA filenames in $FASTA_DIR
 SAMPLESHEET_OPTIONAL=0
 if [[ "$MODE" == "wgs" && "$SKIP_ASSEMBLY" -eq 1 && -f "$BATCH_FA" ]]; then
+  SAMPLESHEET_OPTIONAL=1
+fi
+if [[ "$MODE" == "sanger" ]]; then
   SAMPLESHEET_OPTIONAL=1
 fi
 if [[ -z "$SAMPLESHEET" && "$SAMPLESHEET_OPTIONAL" -eq 0 ]]; then
@@ -340,7 +346,15 @@ fi
 # ════════════════════════════════════════════════════════════════════════════
 if [[ "$MODE" == "sanger" ]]; then
 
-  step "Sanger 1/1: Prepare batch FASTA from samplesheet"
+  # Auto-generate samplesheet from FASTA filenames if not provided
+  if [[ -z "$SAMPLESHEET" ]] || [[ ! -f "$SAMPLESHEET" ]]; then
+    step "Sanger 1/2: Generate samplesheet from FASTA directory"
+    AUTO_SAMPLESHEET="$BATCH_DIR/auto_samplesheet.tsv"
+    "$RSCRIPT" scripts/generate_samplesheet.R "$FASTA_DIR" "$AUTO_SAMPLESHEET" || exit 1
+    SAMPLESHEET="$AUTO_SAMPLESHEET"
+  fi
+
+  step "Sanger 2/2: Prepare batch FASTA from samplesheet"
   "$RSCRIPT" scripts/prepare_input_fasta.R "$FASTA_DIR" "$SAMPLESHEET" "$BATCH_FA"
   if [[ ! -f "$BATCH_FA" ]]; then
     echo "ERROR: prepare_input_fasta.R completed but $BATCH_FA was not created." >&2
