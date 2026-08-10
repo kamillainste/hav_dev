@@ -3,8 +3,8 @@
 #
 # Builds a per-query-sequence IQ-TREE phylogenetic tree containing the query
 # and its N nearest neighbors drawn from:
-#   - Top BLAST hits (ranked by bitscore)
-#   - Nearest-node sequences from all NextClade runs (nearestNodeName from NDJSON)
+#   - BLAST hits (ranked by bitscore, max 2 per lineage for diversity)
+#   - Nearest-node sequences from NextClade runs (nearestNodeName from NDJSON)
 #
 # Called by run_all_analyses.sh with:
 #   bash scripts/build_per_seq_trees.sh <batch_dir> <dataset_date> <n_neighbors> <out_base> <dataset_dir> <batch_fa>
@@ -17,15 +17,21 @@
 #   <dataset_dir>  Path to local_datasets/<dataset_date>
 #   <batch_fa>     Path to batch FASTA file
 #
+# BLAST neighbor selection strategy:
+#   - Lineages from metadata_corrected.tsv are used to group hits
+#   - Maximum 2 sequences per lineage (prevents over-representation of common variants)
+#   - Remaining slots filled by NextClade community tree neighbors
+#
 # Writes per sequence to <out_base>/trees/<seqName>/:
-#   neighbors.txt         — list of reference IDs used
-#   combined.fa           — query + neighbor sequences (unaligned)
-#   aligned.fa            — MAFFT alignment
-#   aligned_trimmed.fa    — MAFFT alignment trimmed to the junction region
-#   tree.treefile         — IQ-TREE best ML tree with bootstrap values
-#   tree.iqtree           — IQ-TREE run summary
-#   tree.log              — IQ-TREE log
-#   tree.contree          — consensus tree
+#   neighbors.txt                    — list of reference IDs used
+#   combined.fa                      — query + neighbor sequences (unaligned)
+#   aligned.fa                       — MAFFT alignment
+#   aligned_trimmed.fa               — MAFFT alignment trimmed to junction region
+#   aligned_trimmed_blast_only.fa    — BLAST-only alignment (no NextClade references)
+#   tree.treefile                    — IQ-TREE best ML tree with bootstrap values
+#   tree.iqtree                      — IQ-TREE run summary
+#   tree.log                         — IQ-TREE log
+#   tree.contree                     — consensus tree
 #
 # Prerequisites:
 #   - run_all_analyses.sh must have been run first (creates BLAST and NextClade results)
@@ -44,6 +50,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 DEDUP_FA="$DATASET_DIR/blast_db/input_dedup.fa"
 BLAST_DB="$DATASET_DIR/blast_db/hav"
+METADATA_TSV="$DATASET_DIR/metadata_corrected.tsv"
 
 BATCH_NAME=$(basename "$BATCH_DIR")
 TREES_DIR="$OUT_BASE/trees"
@@ -82,30 +89,63 @@ COLLECT_PY="$(mktemp /tmp/collect_neighbors.XXXXXX.py)"
 cat > "$COLLECT_PY" << 'PYEOF'
 """
 Collect up to N neighbor sequence IDs for a given query from:
-  1. BLAST TSV  — top hits ranked by bitscore
+  1. BLAST TSV  — top hits ranked by bitscore, limited to max 2 per lineage
   2. Community tree (hav-vp1-2b-lineages/tree.json) — leaf descendants of the
      Nextclade nearest node, ranked by accumulated branch mutations
 
-Strategy: reserve up to N*2//3 slots for BLAST, fill remaining from community.
+Strategy: 
+  - Group BLAST hits by lineage; take up to 2 from each lineage group
+  - Reserve remaining slots for community tree sequences for diversity
+  - If community yields nothing, fall back to all-BLAST up to n (still grouped by lineage)
 
-Usage: python3 script.py <query_id> <n> <blast_tsv> <nc_lineages_ndjson> <unused> [tree_json]
+Usage: python3 script.py <query_id> <n> <blast_tsv> <nc_lineages_ndjson> <metadata_tsv> [tree_json]
 """
 import sys, json
+from collections import defaultdict
 
-query_id    = sys.argv[1]
-n           = int(sys.argv[2])
-blast_tsv   = sys.argv[3]
-ndjson_path = sys.argv[4]   # nextclade.ndjson for nearestNodeName
-# sys.argv[5] unused (legacy NONE)
-tree_json   = sys.argv[6] if len(sys.argv) > 6 else "NONE"
+query_id      = sys.argv[1]
+n             = int(sys.argv[2])
+blast_tsv     = sys.argv[3]
+ndjson_path   = sys.argv[4]
+metadata_tsv  = sys.argv[5]
+tree_json     = sys.argv[6] if len(sys.argv) > 6 else "NONE"
 
 # BLAST truncates FASTA headers at the first whitespace, so qseqid is always
 # the first word of the full sequence name.  Match on that prefix.
 blast_query_id = query_id.split()[0]
 
-# ── 1. BLAST hits ─────────────────────────────────────────────────────────────
-blast_hits = []   # [(id, bitscore)]
+# ── Load metadata to map sseqid → lineage ──────────────────────────────────────
+lineage_map = {}  # sseqid → lineage
+if metadata_tsv != "NONE":
+    try:
+        with open(metadata_tsv) as f:
+            header = f.readline().rstrip("\n").split("\t")
+            # Find lineage column (try 'lineage', 'community_lineage', 'variant', etc.)
+            lineage_col_idx = None
+            for col_name in ["lineage", "community_lineage", "variant", "genotype"]:
+                if col_name in header:
+                    lineage_col_idx = header.index(col_name)
+                    break
+            
+            if lineage_col_idx is None and len(header) > 1:
+                # Fallback: try second column if no named lineage column found
+                lineage_col_idx = 1
+            
+            if lineage_col_idx is not None:
+                id_col_idx = 0  # Assume first column is ID
+                for line in f:
+                    parts = line.rstrip("\n").split("\t")
+                    if len(parts) > max(id_col_idx, lineage_col_idx):
+                        seq_id = parts[id_col_idx]
+                        lineage = parts[lineage_col_idx].strip() or "unknown"
+                        lineage_map[seq_id] = lineage
+    except (FileNotFoundError, IndexError):
+        pass
+
+# ── 1. BLAST hits grouped by lineage ──────────────────────────────────────────
+blast_by_lineage = defaultdict(list)  # lineage → [(id, bitscore), ...]
 blast_seen = set()
+
 try:
     with open(blast_tsv) as f:
         next(f)  # skip header
@@ -119,17 +159,31 @@ try:
             except ValueError:
                 bitscore = 0.0
             if subject and not subject.startswith("NODE_") and subject not in blast_seen:
-                blast_hits.append((subject, bitscore))
+                # Get lineage from metadata, or use a generic "unknown" key
+                lineage = lineage_map.get(subject, "unknown")
+                blast_by_lineage[lineage].append((subject, bitscore))
                 blast_seen.add(subject)
 except FileNotFoundError:
     pass
 
-blast_hits.sort(key=lambda x: -x[1])
-# Reserve up to 2/3 for BLAST; the rest for community.
-# If community yields nothing, fall back to all-BLAST up to n.
-n_blast_max    = n * 2 // 3
-selected_blast = [h[0] for h in blast_hits[:n_blast_max]]
-blast_fallback = [h[0] for h in blast_hits]  # full list for fallback
+# Sort each lineage group by bitscore (descending)
+for lineage in blast_by_lineage:
+    blast_by_lineage[lineage].sort(key=lambda x: -x[1])
+
+# ── Select up to 2 from each BLAST lineage group ────────────────────────────────
+# Limit to 2/3 of total budget to reserve slots for community sequences
+n_blast_max = n * 2 // 3  # Default: 20 out of 30
+selected_blast = []
+for lineage in sorted(blast_by_lineage.keys()):
+    if len(selected_blast) >= n_blast_max:
+        break  # Stop if we've reached the limit
+    # Take up to 2 from this lineage group, but respect total limit
+    remaining_slots = n_blast_max - len(selected_blast)
+    selected_blast.extend([h[0] for h in blast_by_lineage[lineage][:min(2, remaining_slots)]])
+
+# Reserve slots for community sequences
+n_community_slots = n - len(selected_blast)
+blast_fallback = selected_blast  # Already diversity-filtered
 
 # ── 2. Community tree neighbors ────────────────────────────────────────────────
 community_hits = []   # [(leaf_name, dist_from_nearest_node)]
@@ -187,8 +241,7 @@ if tree_json != "NONE" and ndjson_path != "NONE":
                 collect_leaves(found_node[0], 0, community_hits)
 
                 # If few descendants, expand to sibling subtrees from parent
-                n_needed = n - len(selected_blast)
-                if len(community_hits) < n_needed and found_parent[0]:
+                if len(community_hits) < n_community_slots and found_parent[0]:
                     existing = {h[0] for h in community_hits}
                     for sibling in found_parent[0].get("children", []):
                         if sibling.get("name") != nearest_node_name:
@@ -198,21 +251,29 @@ if tree_json != "NONE" and ndjson_path != "NONE":
             pass
 
 community_hits.sort(key=lambda x: x[1])
-n_community_slots = n - len(selected_blast)
-blast_set         = set(selected_blast)
+blast_set = set(selected_blast)
 selected_community = [
     h[0] for h in community_hits
     if h[0] not in blast_set
 ][:n_community_slots]
 
-# If no community sequences found, fill remaining slots from BLAST
-if not selected_community:
-    selected_blast = blast_fallback[:n]
-    selected_community = []
+# If no community sequences found, fill remaining slots from BLAST diversity-filtered
+if not selected_community and n_community_slots > 0:
+    selected_community = blast_fallback[len(selected_blast):][:n_community_slots]
+    # Trim to fit total n
+    selected_blast = selected_blast[:n - len(selected_community)]
 
-# ── Output ─────────────────────────────────────────────────────────────────────
+# ── Output both combined neighbors and BLAST-only list ──────────────────────────
+# Print all selected neighbors (for tree building)
 for sid in selected_blast + selected_community:
     print(sid)
+
+# Also write BLAST neighbors separately (used for BLAST-only heatmap alignment)
+# Write to stderr so it doesn't mix with stdout
+import sys as sys_mod
+blast_only_list = "\n".join(selected_blast)
+if blast_only_list:
+    sys_mod.stderr.write(blast_only_list + "\n")
 PYEOF
 
 # ── Process each query sequence ───────────────────────────────────────────────
@@ -262,9 +323,10 @@ for QUERY in "${QUERY_IDS[@]}"; do
     "$QUERY_NORMALIZED" "$N_NEIGHBORS" \
     "$BLAST_TSV" \
     "$NC_LINEAGES_NDJSON_ARG" \
-    "NONE" \
+    "$METADATA_TSV" \
     "$LINEAGES_TREE_JSON_ARG" \
-    > "$SEQ_DIR/neighbors.txt"
+    > "$SEQ_DIR/neighbors.txt" \
+    2> "$SEQ_DIR/blast_neighbors.txt"
 
   N_IDS=$(wc -l < "$SEQ_DIR/neighbors.txt")
   echo "  Neighbors found: $N_IDS"
@@ -371,6 +433,57 @@ with open('$TRIMMED_FA') as f:
             break
 " 2>/dev/null || echo 0)
   echo "  Alignment length: $ALN_LEN bp"
+
+  # ── Create BLAST-only alignment (no NextClade references) ─────────────────────
+  # Use blast_neighbors.txt generated by Python script (contains only BLAST neighbors)
+  BLAST_NEIGHBORS_FILE="$SEQ_DIR/blast_neighbors.txt"
+
+  # Filter aligned_trimmed.fa to keep only the query and BLAST neighbors
+  BLAST_ONLY_ALIGNED="$SEQ_DIR/aligned_trimmed_blast_only.fa"
+  python3 - "$TRIMMED_FA" "$BLAST_NEIGHBORS_FILE" "$QUERY" "$BLAST_ONLY_ALIGNED" << 'FILTER_BLAST_PY'
+import sys
+trimmed_fa = sys.argv[1]
+blast_neighbors_file = sys.argv[2]
+query_id = sys.argv[3]
+output_fa = sys.argv[4]
+
+# Read BLAST neighbor IDs
+blast_ids = set()
+try:
+    with open(blast_neighbors_file) as f:
+        for line in f:
+            line = line.strip()
+            if line:  # Skip empty lines
+                blast_ids.add(line)
+except FileNotFoundError:
+    pass
+
+# Read trimmed alignment and filter
+seqs = {}
+order = []
+current_id = None
+with open(trimmed_fa) as f:
+    for line in f:
+        line = line.rstrip()
+        if line.startswith(">"):
+            current_id = line[1:]  # Remove '>'
+            # Keep query and BLAST neighbors
+            if current_id == query_id or current_id in blast_ids:
+                seqs[current_id] = []
+                order.append(current_id)
+            current_id = None if current_id not in seqs else current_id
+        elif current_id is not None and current_id in seqs:
+            seqs[current_id].append(line)
+
+# Write filtered alignment
+with open(output_fa, "w") as out:
+    for seq_id in order:
+        out.write(f">{seq_id}\n")
+        out.write("\n".join(seqs[seq_id]) + "\n")
+FILTER_BLAST_PY
+
+  N_BLAST_ONLY=$(grep -c "^>" "$BLAST_ONLY_ALIGNED" 2>/dev/null || echo 0)
+  echo "  BLAST-only alignment: $N_BLAST_ONLY sequences saved to aligned_trimmed_blast_only.fa"
 
   # Build ML tree with IQ-TREE.
   # UFBoot requires at least 4 taxa, so fall back to no-bootstrap for n=3.
