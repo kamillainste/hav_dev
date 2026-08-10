@@ -365,7 +365,9 @@ blast_best <- blast_best %>%
 # names the first token equals the full name, so this is backward-compatible.
 summary_tbl <- nc_lineages %>%
   mutate(.join_key = word(seqName, 1)) %>%
-  left_join(blast_best %>% mutate(.join_key = word(qseqid, 1)) %>% select(-qseqid),
+  left_join(blast_best %>% 
+            mutate(.join_key = word(qseqid, 1)) %>% 
+            select(.join_key, qseqid, everything()),
             by = ".join_key") %>%
   select(-.join_key)
 
@@ -911,6 +913,96 @@ summary_tbl <- summary_tbl %>%
     )
   )
 
+# ── Read samplesheet for LabWareID and SequenceID ─────────────────────────────
+.ss_sample_info <- tibble()
+.ss_path <- file.path(batch_dir, "auto_samplesheet.tsv")
+if (!file.exists(.ss_path)) {
+  # Try finding any samplesheet
+  .ss_files <- list.files(batch_dir, pattern = "samplesheet\\.tsv$", full.names = TRUE)
+  if (length(.ss_files) > 0) .ss_path <- .ss_files[1]
+}
+if (file.exists(.ss_path)) {
+  .ss_sample_info <- safe_tsv(.ss_path) %>%
+    select(Sample, any_of(c("LabWareID", "SekvensID"))) %>%
+    distinct()
+}
+
+# ── Add input sequence length to summary ─────────────────────────────────────
+.seq_lengths <- if (nrow(input_seq_summary) > 0) {
+  input_seq_summary %>%
+    transmute(seqName, input_length = length)
+} else {
+  tibble(seqName = character(), input_length = integer())
+}
+
+# ── Count BLAST database occurrences per lineage and find similar lineages ────
+# This helps identify how common the detected lineage is in the reference database
+# and warns if other lineages are equally similar (SNP distance <= 3)
+.db_lineage_summary <- if (nrow(metadata_tsv_df <- safe_tsv(metadata_tsv)) > 0 && 
+                            "community_lineage" %in% names(metadata_tsv_df) &&
+                            nrow(blast_raw) > 0) {
+  # Count sequences per lineage in database
+  lineage_counts <- metadata_tsv_df %>%
+    count(community_lineage, name = "db_count") %>%
+    rename(blast_lineage = community_lineage)
+  
+  # Join BLAST results with metadata to get lineage information
+  blast_with_lineage <- blast_raw %>%
+    left_join(metadata_tsv_df %>% 
+              select(id, community_lineage) %>% 
+              rename(sseqid = id, lineage = community_lineage),
+              by = "sseqid")
+  
+  # For each query, identify best hit and find alternative lineages within SNP threshold
+  similar_lineages <- if (nrow(blast_with_lineage) > 0 && !all(is.na(blast_with_lineage$lineage))) {
+    blast_with_lineage %>%
+      filter(!is.na(lineage)) %>%  # Only keep rows with lineage info
+      group_by(qseqid) %>%
+      arrange(mismatch) %>%
+      # Get best hit info
+      mutate(
+        best_rank = row_number(),
+        best_sseqid = first(sseqid),
+        best_lineage = first(lineage),
+        best_mismatch = first(mismatch)
+      ) %>%
+      # Filter for alternative hits within SNP threshold
+      filter(
+        mismatch <= best_mismatch + 3,  # Within 3 SNPs of best
+        lineage != best_lineage,        # Different lineage
+        sseqid != best_sseqid           # Not the best hit itself
+      ) %>%
+      # Aggregate alternative lineages for this query
+      group_by(qseqid, best_sseqid) %>%
+      summarise(
+        similar_lineages = paste(unique(sort(lineage)), collapse = ", "),
+        .groups = "drop"
+      ) %>%
+      # Keep only one entry per best hit (per query)
+      select(qseqid, sseqid = best_sseqid, similar_lineages)
+  } else {
+    tibble(qseqid = character(), sseqid = character(), similar_lineages = character())
+  }
+  
+  # Combine counts with info about similar lineages
+  list(
+    counts = lineage_counts,
+    similar = similar_lineages
+  )
+} else {
+  list(
+    counts = tibble(blast_lineage = character(), db_count = integer()),
+    similar = tibble(qseqid = character(), sseqid = character(), similar_lineages = character())
+  )
+}
+
+.blast_lineage_counts <- .db_lineage_summary$counts %>%
+  rename(db_lineage_count = db_count)
+
+.similar_lineages_map <- .db_lineage_summary$similar %>%
+  setNames(c("qseqid", "sseqid", "similar_lineages")) %>%
+  {if (nrow(.) > 0) . else tibble(sseqid = character(), similar_lineages = character())}
+
 # ── Batch triage: one confidence flag per sample ──────────────────────────────
 # Lets the expert skip the obvious calls and focus on the few that need a look.
 # The flag is driven by genotype confidence (the report's primary question), not
@@ -925,7 +1017,16 @@ summary_tbl <- summary_tbl %>%
 triage_tbl <- summary_tbl %>%
   mutate(join_key = word(seqName, 1)) %>%
   left_join(.called, by = "join_key") %>%
+  left_join(.seq_lengths, by = "seqName") %>%
+  left_join(.ss_sample_info, by = c("seqName" = "Sample")) %>%
+  left_join(.blast_lineage_counts, by = "blast_lineage") %>%
+  left_join(.db_lineage_summary$similar, 
+            by = c("qseqid" = "qseqid", "sseqid" = "sseqid")) %>%
   mutate(
+    # Format similar lineages warning
+    similar_lineages_msg = if_else(!is.na(similar_lineages) & similar_lineages != "",
+                                   paste0("⚠ Also similar (≤3 SNPs): ", similar_lineages, " — see heatmap"),
+                                   ""),
     flag = case_when(
       is.na(clade)                                   ~ "No call",
       !is.na(clade_agree_blast) & !clade_agree_blast ~ "Review",
@@ -962,21 +1063,46 @@ This report compares complementary HAV analyses run on **`r batch_name`**:
 triage_tbl %>%
   arrange(factor(flag, levels = .flag_ord), seqName) %>%
   transmute(
-    Sample          = seqName,
-    `Called %`      = if_else(!is.na(called_frac), percent(called_frac, 1), "—"),
+    `LabWareID`     = if_else(!is.na(LabWareID), LabWareID, "—"),
+    `SequenceID`    = if_else(!is.na(SekvensID), SekvensID, "—"),
     `Genotype (NC)` = if_else(!is.na(clade), clade, "—"),
-    `BLAST geno`    = if_else(!is.na(blast_genotype), blast_genotype, "—"),
-    Agree           = case_when(is.na(clade_agree_blast) ~ "—",
+    `Genotype (BLAST)` = if_else(!is.na(blast_genotype), blast_genotype, "—"),
+    `Agree`         = case_when(is.na(clade_agree_blast) ~ "—",
                                 clade_agree_blast ~ "✓", TRUE ~ "✗"),
-    `Nearest hit`   = if_else(!is.na(sseqid), sseqid, "—"),
-    `%id`           = if_else(!is.na(blast_pident), paste0(round(blast_pident, 1), "%"), "—"),
-    `SNP dist`      = if_else(!is.na(blast_mismatch), as.character(blast_mismatch), "—"),
-    Flag            = cell_spec(flag, color = "white", background = .flag_col[flag], bold = TRUE),
-    Notes           = flag_reason
-  ) %>%
+    `BLAST top hit` = if_else(!is.na(sseqid), sseqid, "—"),
+    `BLAST lineage` = if_else(!is.na(blast_lineage), blast_lineage, "—"),
+    `BLAST SNPs`    = if_else(!is.na(blast_mismatch), as.character(blast_mismatch), "—"),
+    `DB lineage count` = if_else(!is.na(db_lineage_count), as.character(db_lineage_count), "—"),
+    `Similar BLAST lineage` = if_else(similar_lineages_msg != "", similar_lineages_msg, "—"),
+    `Input length`  = if_else(!is.na(input_length), as.character(input_length), "—"),
+    `Called %`      = if_else(!is.na(called_frac), percent(called_frac, 1), "—"),
+    `Flag`          = cell_spec(flag, color = "white", background = .flag_col[flag], bold = TRUE),
+    `Notes`         = flag_reason
+  ) -> .triage_display
+
+# Calculate background colors for BLAST SNPs column (same as Per-sequence summary)
+.snp_colors <- .triage_display$`BLAST SNPs` %>%
+  map_chr(~ {
+    if (. == "—") {
+      ""  # Empty string for no background
+    } else {
+      snp_count <- as.numeric(.)
+      if (snp_count == 0) {
+        "#c8e6c9"  # Light green for 0 SNPs
+      } else if (snp_count <= 2) {
+        "#fff9c4"  # Light yellow for 1-2 SNPs
+      } else {
+        ""  # Empty string for no background
+      }
+    }
+  })
+
+.triage_display %>%
   kbl(escape = FALSE,
-      caption = "Per-sample verdict — sorted with items needing review first. Green = clear, red = genotype disagreement, grey = no NextClade call (usually low coverage).") %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = TRUE)
+      caption = "Batch overview — sorted with items needing review first. Green = clear, red = genotype disagreement, grey = no NextClade call (usually low coverage). Called % = percentage of sequence bases that are unambiguous (A/C/G/T; excludes N and other ambiguous codes). DB lineage count = number of sequences in reference database with same BLAST lineage.") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = TRUE) %>%
+  column_spec(7, width = "30em", extra_css = "white-space: nowrap; overflow: visible;") %>%  # BLAST lineage - prevent wrapping
+  column_spec(8, background = .snp_colors, bold = TRUE)  # Color code BLAST SNPs
 ```
 
 `r {n_clear <- sum(triage_tbl$flag=="Clear"); n_rev <- sum(triage_tbl$flag=="Review"); n_no <- sum(triage_tbl$flag=="No call"); sprintf("**%d clear · %d to review · %d no call** of %d samples.", n_clear, n_rev, n_no, nrow(triage_tbl))}`
@@ -1609,7 +1735,12 @@ query_ids_normalized <- word(query_ids, 1)
 }
 
 treefile_exists <- sapply(query_ids_normalized, function(id) file.exists(file.path(trees_dir, id, "tree.treefile")))
-aln_exists <- sapply(query_ids_normalized, function(id) file.exists(file.path(trees_dir, id, "aligned_trimmed.fa")))
+aln_exists <- sapply(query_ids_normalized, function(id) {
+  # Prefer BLAST-only alignment if available, otherwise fall back to full alignment
+  blast_only <- file.exists(file.path(trees_dir, id, "aligned_trimmed_blast_only.fa"))
+  full_aln <- file.exists(file.path(trees_dir, id, "aligned_trimmed.fa"))
+  blast_only || full_aln
+})
 
 if (length(query_ids) == 0) {
   cat("## Status\n\n")
@@ -1642,7 +1773,12 @@ for (i in seq_along(query_ids)) {
   cat(paste0("\n## ", query_id, "\n\n"))
 
   tree_dir <- file.path(trees_dir, query_id_norm)
-  aln_file <- file.path(tree_dir, "aligned_trimmed.fa")
+  # Prefer BLAST-only alignment if available, otherwise fall back to full alignment
+  aln_file <- if (file.exists(file.path(tree_dir, "aligned_trimmed_blast_only.fa"))) {
+    file.path(tree_dir, "aligned_trimmed_blast_only.fa")
+  } else {
+    file.path(tree_dir, "aligned_trimmed.fa")
+  }
   treefile <- file.path(tree_dir, "tree.treefile")
   tr <- NULL
 
@@ -1745,15 +1881,38 @@ for (i in seq_along(query_ids)) {
 
   # ── 2. SNP distance heatmap ─────────────────────────────────────────────────
   cat("### SNP distance heatmap\n\n")
-  if (is.null(seqs_raw) || nrow(seqs_raw) < 2) {
+  
+  # Filter sequences: keep only query + BLAST database sequences (exclude NextClade references)
+  # If too few filtered sequences, fall back to all sequences
+  seqs_heatmap <- if (!is.null(seqs_raw) && nrow(seqs_raw) > 0) {
+    # Get all sequence IDs from alignment
+    all_ids <- rownames(seqs_raw)
+    # Keep only: query (if present) + sequences that are in BLAST database
+    blast_ids <- intersect(community_meta$id, all_ids)
+    query_ids_keep <- if (query_id %in% all_ids) query_id else character()
+    keep_ids <- unique(c(query_ids_keep, blast_ids))
+    
+    # Use filtered set if we have at least 2 sequences; otherwise fall back to all
+    if (length(keep_ids) >= 2) {
+      seqs_raw[keep_ids, , drop = FALSE]
+    } else if (nrow(seqs_raw) >= 2) {
+      seqs_raw  # Fall back to all sequences
+    } else {
+      NULL
+    }
+  } else {
+    NULL
+  }
+  
+  if (is.null(seqs_heatmap) || nrow(seqs_heatmap) < 2) {
     cat("*Alignment not available or too few sequences.*\n\n")
   } else {
-    n_tips  <- nrow(seqs_raw)
-    ids     <- rownames(seqs_raw)
+    n_tips  <- nrow(seqs_heatmap)
+    ids     <- rownames(seqs_heatmap)
     snp_mat <- matrix(0L, n_tips, n_tips, dimnames = list(ids, ids))
     for (i in seq_len(n_tips - 1)) {
       for (j in (i + 1):n_tips) {
-        s1 <- seqs_raw[i, ]; s2 <- seqs_raw[j, ]
+        s1 <- seqs_heatmap[i, ]; s2 <- seqs_heatmap[j, ]
         valid <- s1 %in% called & s2 %in% called
         d <- sum(s1[valid] != s2[valid])
         snp_mat[i, j] <- snp_mat[j, i] <- d
@@ -1761,12 +1920,10 @@ for (i in seq_along(query_ids)) {
     }
 
     lbl_tbl <- tibble(id = ids) %>%
-      left_join(ref_meta %>% select(id_norm, lineage, lineage_phylo),
-                by = c("id" = "id_norm")) %>%
       left_join(community_meta, by = "id") %>%
       mutate(
-        lineage_phylo = coalesce(lineage_phylo, community_lineage_phylo),
-        lineage       = coalesce(lineage, community_clade),
+        lineage_phylo = community_lineage_phylo,
+        lineage       = community_clade,
         lineage_phylo = if_else(is.na(lineage_phylo) | lineage_phylo == "",
                                 NA_character_, lineage_phylo),
         # Shorten long FASTA headers: extract accession + isolate/strain name
@@ -1807,9 +1964,9 @@ for (i in seq_along(query_ids)) {
     # Adaptive sizing: base cell size on number of sequences
     # Ensures readable labels and numbers even with many sequences
     cell_size <- if (n_tips <= 10) 60 else if (n_tips <= 20) 45 else 30
-    fontsize_main <- if (n_tips <= 10) 13 else if (n_tips <= 20) 12 else 11
-    fontsize_num <- if (n_tips <= 10) 11 else if (n_tips <= 20) 10 else 9
-    fontsize_row <- if (n_tips <= 15) 12 else 10
+    fontsize_main <- if (n_tips <= 10) 15 else if (n_tips <= 20) 14 else 13
+    fontsize_num <- if (n_tips <= 10) 12 else if (n_tips <= 20) 11 else 10
+    fontsize_row <- if (n_tips <= 15) 13 else 11
     
     # Calculate figure size with minimum/maximum constraints
     px <- min(18, max(10, n_tips * (cell_size / 35)))
@@ -2402,6 +2559,7 @@ tibble(
     file.path(params$out_base, "lineages", "nextclade.tsv"),
     file.path(params$out_base, "trees", "<seqName>", "tree.treefile"),
     file.path(params$out_base, "trees", "<seqName>", "aligned_trimmed.fa"),
+    file.path(params$out_base, "trees", "<seqName>", "aligned_trimmed_blast_only.fa"),
     file.path(params$out_base, "snp_matrices", "<seqName>_snp_distances.tsv"),
     file.path(params$out_base, "summary.tsv"),
     file.path(params$out_base, "comparison.tsv")
@@ -2410,7 +2568,8 @@ tibble(
     "BLAST hits vs local HAV database",
     "NextClade: lineages dataset (clade + lineage_phylo)",
     "IQ-TREE ML tree per query sequence",
-    "MAFFT alignment used for each tree",
+    "MAFFT alignment (query + BLAST hits + NextClade community sequences)",
+    "MAFFT alignment with BLAST hits only (no NextClade) — used for heatmap in report",
     "Pairwise SNP distance matrix per query sequence (TSV format for external analysis)",
     "Per-sequence summary table (this report, TSV)",
     "Clade comparison table (this report, TSV)"
