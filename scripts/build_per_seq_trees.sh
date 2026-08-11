@@ -98,7 +98,7 @@ Strategy:
   - Reserve remaining slots for community tree sequences for diversity
   - If community yields nothing, fall back to all-BLAST up to n (still grouped by lineage)
 
-Usage: python3 script.py <query_id> <n> <blast_tsv> <nc_lineages_ndjson> <metadata_tsv> [tree_json]
+Usage: python3 script.py <query_id> <n> <blast_tsv> <nc_lineages_ndjson> <metadata_tsv> <tree_json> <blast_only_out>
 """
 import sys, json
 from collections import defaultdict
@@ -109,6 +109,7 @@ blast_tsv     = sys.argv[3]
 ndjson_path   = sys.argv[4]
 metadata_tsv  = sys.argv[5]
 tree_json     = sys.argv[6] if len(sys.argv) > 6 else "NONE"
+blast_only_out = sys.argv[7] if len(sys.argv) > 7 else None
 
 # BLAST truncates FASTA headers at the first whitespace, so qseqid is always
 # the first word of the full sequence name.  Match on that prefix.
@@ -117,33 +118,40 @@ blast_query_id = query_id.split()[0]
 # ── Load metadata to map sseqid → lineage ──────────────────────────────────────
 lineage_map = {}  # sseqid → lineage
 if metadata_tsv != "NONE":
-    try:
-        with open(metadata_tsv) as f:
-            header = f.readline().rstrip("\n").split("\t")
-            # Find lineage column (try 'lineage', 'community_lineage', 'variant', etc.)
-            lineage_col_idx = None
-            for col_name in ["lineage", "community_lineage", "variant", "genotype"]:
-                if col_name in header:
-                    lineage_col_idx = header.index(col_name)
-                    break
-            
-            if lineage_col_idx is None and len(header) > 1:
-                # Fallback: try second column if no named lineage column found
-                lineage_col_idx = 1
-            
-            if lineage_col_idx is not None:
-                id_col_idx = 0  # Assume first column is ID
-                for line in f:
-                    parts = line.rstrip("\n").split("\t")
-                    if len(parts) > max(id_col_idx, lineage_col_idx):
-                        seq_id = parts[id_col_idx]
-                        lineage = parts[lineage_col_idx].strip() or "unknown"
-                        lineage_map[seq_id] = lineage
-    except (FileNotFoundError, IndexError):
-        pass
+  try:
+    with open(metadata_tsv) as f:
+      header = f.readline().rstrip("\n").split("\t")
+
+      id_col_idx = 0
+      for id_col_name in ["id", "accession", "seqName", "name"]:
+        if id_col_name in header:
+          id_col_idx = header.index(id_col_name)
+          break
+
+      # Find lineage column (try 'lineage', 'community_lineage', 'variant', etc.)
+      lineage_col_idx = None
+      for col_name in ["lineage", "community_lineage", "lineage_phylo", "variant", "genotype"]:
+        if col_name in header:
+          lineage_col_idx = header.index(col_name)
+          break
+
+      if lineage_col_idx is None and len(header) > 1:
+        # Fallback: try second column if no named lineage column found
+        lineage_col_idx = 1
+
+      if lineage_col_idx is not None:
+        for line in f:
+          parts = line.rstrip("\n").split("\t")
+          if len(parts) > max(id_col_idx, lineage_col_idx):
+            seq_id = parts[id_col_idx]
+            lineage = parts[lineage_col_idx].strip() or "unknown"
+            lineage_map[seq_id] = lineage
+  except (FileNotFoundError, IndexError):
+    pass
 
 # ── 1. BLAST hits grouped by lineage ──────────────────────────────────────────
-blast_by_lineage = defaultdict(list)  # lineage → [(id, bitscore), ...]
+# Keep global BLAST ordering by SNP mismatch first (nearest), then bitscore.
+blast_hits_ranked = []  # [(subject, mismatch, bitscore, lineage)]
 blast_seen = set()
 
 try:
@@ -155,35 +163,41 @@ try:
                 continue
             subject = parts[1]
             try:
+                mismatch = int(parts[4])
+            except ValueError:
+                mismatch = 10**9
+            try:
                 bitscore = float(parts[11])
             except ValueError:
                 bitscore = 0.0
             if subject and not subject.startswith("NODE_") and subject not in blast_seen:
-                # Get lineage from metadata, or use a generic "unknown" key
                 lineage = lineage_map.get(subject, "unknown")
-                blast_by_lineage[lineage].append((subject, bitscore))
+                blast_hits_ranked.append((subject, mismatch, bitscore, lineage))
                 blast_seen.add(subject)
 except FileNotFoundError:
     pass
 
-# Sort each lineage group by bitscore (descending)
-for lineage in blast_by_lineage:
-    blast_by_lineage[lineage].sort(key=lambda x: -x[1])
+# Lowest mismatch first, then highest bitscore
+blast_hits_ranked.sort(key=lambda x: (x[1], -x[2]))
 
-# ── Select up to 2 from each BLAST lineage group ────────────────────────────────
-# Limit to 2/3 of total budget to reserve slots for community sequences
+# ── Select BLAST hits: score-prioritized, max 2 per lineage ──────────────────
+# Preserve previous total cap: use up to 2/3 for BLAST, reserve 1/3 for community.
 n_blast_max = n * 2 // 3  # Default: 20 out of 30
 selected_blast = []
-for lineage in sorted(blast_by_lineage.keys()):
-    if len(selected_blast) >= n_blast_max:
-        break  # Stop if we've reached the limit
-    # Take up to 2 from this lineage group, but respect total limit
-    remaining_slots = n_blast_max - len(selected_blast)
-    selected_blast.extend([h[0] for h in blast_by_lineage[lineage][:min(2, remaining_slots)]])
+lineage_used = defaultdict(int)
+eligible_blast_ranked = []
+
+for subject, mismatch, bitscore, lineage in blast_hits_ranked:
+  if lineage_used[lineage] >= 2:
+    continue
+  lineage_used[lineage] += 1
+  eligible_blast_ranked.append(subject)
+
+selected_blast = eligible_blast_ranked[:n_blast_max]
 
 # Reserve slots for community sequences
 n_community_slots = n - len(selected_blast)
-blast_fallback = selected_blast  # Already diversity-filtered
+blast_fallback = eligible_blast_ranked
 
 # ── 2. Community tree neighbors ────────────────────────────────────────────────
 community_hits = []   # [(leaf_name, dist_from_nearest_node)]
@@ -257,23 +271,22 @@ selected_community = [
     if h[0] not in blast_set
 ][:n_community_slots]
 
-# If no community sequences found, fill remaining slots from BLAST diversity-filtered
+# If no community sequences found, fill remaining slots from remaining BLAST hits.
 if not selected_community and n_community_slots > 0:
-    selected_community = blast_fallback[len(selected_blast):][:n_community_slots]
-    # Trim to fit total n
-    selected_blast = selected_blast[:n - len(selected_community)]
+  selected_community = blast_fallback[len(selected_blast):len(selected_blast) + n_community_slots]
+  # Trim to fit total n
+  selected_blast = selected_blast[:n - len(selected_community)]
 
-# ── Output both combined neighbors and BLAST-only list ──────────────────────────
+# ── Output selected neighbors ─────────────────────────────────────────────────
 # Print all selected neighbors (for tree building)
 for sid in selected_blast + selected_community:
     print(sid)
 
 # Also write BLAST neighbors separately (used for BLAST-only heatmap alignment)
-# Write to stderr so it doesn't mix with stdout
-import sys as sys_mod
-blast_only_list = "\n".join(selected_blast)
-if blast_only_list:
-    sys_mod.stderr.write(blast_only_list + "\n")
+if blast_only_out:
+  with open(blast_only_out, "w") as out:
+    for sid in selected_blast:
+      out.write(sid + "\n")
 PYEOF
 
 # ── Process each query sequence ───────────────────────────────────────────────
@@ -319,14 +332,23 @@ for QUERY in "${QUERY_IDS[@]}"; do
 #Python-scriptet collect_neighbors.py sjekker deretter om verdien er "NONE" og 
 #hopper over den delen av analysen.
  
+  BLAST_NEIGHBORS_FILE="$SEQ_DIR/blast_neighbors.txt"
+
   python3 "$COLLECT_PY" \
     "$QUERY_NORMALIZED" "$N_NEIGHBORS" \
     "$BLAST_TSV" \
     "$NC_LINEAGES_NDJSON_ARG" \
     "$METADATA_TSV" \
     "$LINEAGES_TREE_JSON_ARG" \
-    > "$SEQ_DIR/neighbors.txt" \
-    2> "$SEQ_DIR/blast_neighbors.txt"
+    "$BLAST_NEIGHBORS_FILE" \
+    > "$SEQ_DIR/neighbors.txt"
+
+  # Dataset-specific exclusion: ID 534954 is known reverse-complemented in
+  # dataset 2026-04-10 and should be ignored.
+  if [[ "$DATASET_DATE" == "2026-04-10" ]]; then
+    sed -i '/^534954$/d' "$SEQ_DIR/neighbors.txt"
+    sed -i '/^534954$/d' "$BLAST_NEIGHBORS_FILE"
+  fi
 
   N_IDS=$(wc -l < "$SEQ_DIR/neighbors.txt")
   echo "  Neighbors found: $N_IDS"
@@ -391,9 +413,12 @@ for QUERY in "${QUERY_IDS[@]}"; do
   echo "  Aligning with MAFFT..."
   mafft --auto --quiet --thread "$THREADS" "$COMBINED_FA" > "$ALIGNED_FA"
 
-  # Remove all-gap columns (trim alignment)
+  # Trim alignment for per-query inference.
+  # Keep only columns covered by the query sequence (non-gap), then remove
+  # non-informative columns. This avoids huge branch artifacts when mixing
+  # short amplicons with long references in sparse full-length alignments.
   TRIMMED_FA="$SEQ_DIR/aligned_trimmed.fa"
-  python3 - "$ALIGNED_FA" "$TRIMMED_FA" << 'TRIM_PY'
+  python3 - "$ALIGNED_FA" "$TRIMMED_FA" "$QUERY" << 'TRIM_PY'
 import sys
 seqs = {}
 order = []
@@ -408,6 +433,7 @@ with open(sys.argv[1]) as f:
         elif cur_id:
             seqs[cur_id].append(line)
 seqs = {k: "".join(v) for k, v in seqs.items()}
+query_id = sys.argv[3]
 # find non-all-gap columns
 lens = set(len(v) for v in seqs.values())
 if len(lens) != 1:
@@ -417,7 +443,21 @@ if len(lens) != 1:
             out.write(f">{sid}\n{seqs[sid]}\n")
 else:
     L = next(iter(lens))
-    keep = [i for i in range(L) if any(seqs[s][i] not in "-N" for s in order)]
+    qseq = seqs.get(query_id)
+    if qseq is None:
+      # Fallback: if query header was altered, use first sequence as query.
+      qseq = seqs[order[0]]
+
+    keep = [
+      i for i in range(L)
+      if qseq[i] not in "-N" and any(seqs[s][i] not in "-N" for s in order)
+    ]
+
+    # Safety fallback: if query-aware trimming removes everything, revert to
+    # previous all-sequence informative-column behavior.
+    if not keep:
+      keep = [i for i in range(L) if any(seqs[s][i] not in "-N" for s in order)]
+
     with open(sys.argv[2], "w") as out:
         for sid in order:
             trimmed = "".join(seqs[sid][i] for i in keep)
