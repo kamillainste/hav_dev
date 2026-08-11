@@ -117,6 +117,9 @@ meta <- safe_tsv(metadata_tsv)
 if (nrow(meta) > 0 && "date" %in% names(meta)) {
   meta <- meta %>% mutate(date = as.character(date))
 }
+if (params$dataset_date == "2026-04-10" && nrow(meta) > 0 && "id" %in% names(meta)) {
+  meta <- meta %>% filter(as.character(id) != "534954")
+}
 
 # Community sequence metadata from hav-vp1-2b-lineages tree.json
 # Provides clade_membership + lineage_phylo for NCBI accessions used as neighbors
@@ -147,12 +150,18 @@ if (file.exists(.ltree_json)) {
       community_lineage_phylo = if_else(is.na(community_lineage_phylo) | community_lineage_phylo %in% c("", "unassigned"),
                                         NA_character_, community_lineage_phylo)
     )
+  if (params$dataset_date == "2026-04-10") {
+    community_meta <- community_meta %>% filter(as.character(id) != "534954")
+  }
   rm(.ltree, .cl_leaves)
 }
 rm(.ltree_json)
 
 # BLAST results
 blast_raw <- safe_tsv(file.path(out_dir, "blast_results.tsv"))
+if (params$dataset_date == "2026-04-10" && nrow(blast_raw) > 0 && "sseqid" %in% names(blast_raw)) {
+  blast_raw <- blast_raw %>% filter(as.character(sseqid) != "534954")
+}
 
 # ── Amplicon coverage + primer scheme (whole-genome / ViroConstrictor only) ───
 # ViroConstrictor writes one mean-coverage value per amplicon per sample to
@@ -310,13 +319,21 @@ all_queries <- nc_lineages$seqName
 
 # Metadata for joining reference info to BLAST hits
 meta_for_join <- if (nrow(meta) > 0) {
-  meta_base <- meta %>% select(id, any_of(c("date", "genotype", "lineage"))) %>% rename(sseqid = id)
-  
-  # Conditionally rename columns if they exist
-  if ("genotype" %in% names(meta_base)) meta_base <- rename(meta_base, hit_genotype = genotype)
-  if ("lineage" %in% names(meta_base)) meta_base <- rename(meta_base, hit_lineage = lineage)
-  if ("date" %in% names(meta_base)) meta_base <- rename(meta_base, hit_date = date)
-  
+  meta_lineage_col <- case_when(
+    "lineage" %in% names(meta) ~ "lineage",
+    "community_lineage" %in% names(meta) ~ "community_lineage",
+    "lineage_phylo" %in% names(meta) ~ "lineage_phylo",
+    TRUE ~ NA_character_
+  )
+
+  meta_base <- meta %>%
+    transmute(
+      sseqid = id,
+      hit_date = if ("date" %in% names(meta)) as.character(date) else NA_character_,
+      hit_genotype = if ("genotype" %in% names(meta)) as.character(genotype) else NA_character_,
+      hit_lineage = if (!is.na(meta_lineage_col)) as.character(.data[[meta_lineage_col]]) else NA_character_
+    )
+
   meta_base
 } else {
   tibble(sseqid = character())
@@ -326,7 +343,8 @@ meta_for_join <- if (nrow(meta) > 0) {
 blast_top <- if (nrow(blast_raw) > 0 && "sseqid" %in% names(blast_raw)) {
   blast_raw %>%
     left_join(meta_for_join, by = "sseqid") %>%
-    arrange(qseqid, desc(bitscore)) %>%
+    # Define "nearest BLAST hit" as lowest SNP mismatch first, then highest bitscore.
+    arrange(qseqid, mismatch, desc(bitscore)) %>%
     group_by(qseqid) %>%
     mutate(hit_rank = row_number()) %>%
     ungroup()
@@ -938,62 +956,66 @@ if (file.exists(.ss_path)) {
 # ── Count BLAST database occurrences per lineage and find similar lineages ────
 # This helps identify how common the detected lineage is in the reference database
 # and warns if other lineages are equally similar (SNP distance <= 3)
-.db_lineage_summary <- if (nrow(metadata_tsv_df <- safe_tsv(metadata_tsv)) > 0 && 
-                            "community_lineage" %in% names(metadata_tsv_df) &&
-                            nrow(blast_raw) > 0) {
-  # Count sequences per lineage in database
-  lineage_counts <- metadata_tsv_df %>%
-    count(community_lineage, name = "db_count") %>%
-    rename(blast_lineage = community_lineage)
-  
-  # Join BLAST results with metadata to get lineage information
-  blast_with_lineage <- blast_raw %>%
-    left_join(metadata_tsv_df %>% 
-              select(id, community_lineage) %>% 
-              rename(sseqid = id, lineage = community_lineage),
-              by = "sseqid")
-  
-  # For each query, identify best hit and find alternative lineages within SNP threshold
-  similar_lineages <- if (nrow(blast_with_lineage) > 0 && !all(is.na(blast_with_lineage$lineage))) {
-    blast_with_lineage %>%
-      filter(!is.na(lineage)) %>%  # Only keep rows with lineage info
+.db_lineage_summary <- {
+  metadata_tsv_df <- safe_tsv(metadata_tsv)
+
+  # The local metadata can expose lineage with different column names.
+  lineage_col <- dplyr::case_when(
+    "lineage" %in% names(metadata_tsv_df) ~ "lineage",
+    "community_lineage" %in% names(metadata_tsv_df) ~ "community_lineage",
+    "lineage_phylo" %in% names(metadata_tsv_df) ~ "lineage_phylo",
+    TRUE ~ NA_character_
+  )
+
+  if (nrow(metadata_tsv_df) > 0 && !is.na(lineage_col) && nrow(blast_raw) > 0) {
+    # Normalize metadata lineage into one canonical column for counting/joining.
+    metadata_lineage <- metadata_tsv_df %>%
+      transmute(
+        id,
+        lineage = as.character(.data[[lineage_col]])
+      ) %>%
+      filter(!is.na(lineage), lineage != "")
+
+    # Count sequences per lineage in the local database.
+    lineage_counts <- metadata_lineage %>%
+      count(lineage, name = "db_count") %>%
+      rename(blast_lineage = lineage)
+
+    # Join BLAST results with metadata to get lineage per hit.
+    blast_with_lineage <- blast_raw %>%
+      left_join(metadata_lineage %>% rename(sseqid = id), by = "sseqid")
+
+    # For each sample/query, find alternative lineages within <=3 SNP total
+    # from the query sequence (absolute threshold, not relative to best hit).
+    similar_lineages <- blast_with_lineage %>%
+      filter(!is.na(lineage)) %>%
       group_by(qseqid) %>%
-      arrange(mismatch) %>%
-      # Get best hit info
+      arrange(mismatch, desc(bitscore), .by_group = TRUE) %>%
       mutate(
-        best_rank = row_number(),
         best_sseqid = first(sseqid),
-        best_lineage = first(lineage),
-        best_mismatch = first(mismatch)
+        best_lineage = first(lineage)
       ) %>%
-      # Filter for alternative hits within SNP threshold
       filter(
-        mismatch <= best_mismatch + 3,  # Within 3 SNPs of best
-        lineage != best_lineage,        # Different lineage
-        sseqid != best_sseqid           # Not the best hit itself
+        sseqid != best_sseqid,
+        lineage != best_lineage,
+        mismatch <= 3
       ) %>%
-      # Aggregate alternative lineages for this query
-      group_by(qseqid, best_sseqid) %>%
       summarise(
+        sseqid = first(best_sseqid),
         similar_lineages = paste(unique(sort(lineage)), collapse = ", "),
         .groups = "drop"
-      ) %>%
-      # Keep only one entry per best hit (per query)
-      select(qseqid, sseqid = best_sseqid, similar_lineages)
+      )
+
+    list(
+      counts = lineage_counts,
+      similar = similar_lineages
+    )
   } else {
-    tibble(qseqid = character(), sseqid = character(), similar_lineages = character())
+    list(
+      counts = tibble(blast_lineage = character(), db_count = integer()),
+      similar = tibble(qseqid = character(), sseqid = character(), similar_lineages = character())
+    )
   }
-  
-  # Combine counts with info about similar lineages
-  list(
-    counts = lineage_counts,
-    similar = similar_lineages
-  )
-} else {
-  list(
-    counts = tibble(blast_lineage = character(), db_count = integer()),
-    similar = tibble(qseqid = character(), sseqid = character(), similar_lineages = character())
-  )
 }
 
 .blast_lineage_counts <- .db_lineage_summary$counts %>%
@@ -1024,9 +1046,16 @@ triage_tbl <- summary_tbl %>%
             by = c("qseqid" = "qseqid", "sseqid" = "sseqid")) %>%
   mutate(
     # Format similar lineages warning
-    similar_lineages_msg = if_else(!is.na(similar_lineages) & similar_lineages != "",
-                                   paste0("⚠ Also similar (≤3 SNPs): ", similar_lineages, " — see heatmap"),
-                                   ""),
+    similar_lineages_msg = map_chr(similar_lineages, ~ {
+      if (is.na(.x) || .x == "") return("")
+      ids <- str_split(.x, ",\\s*", simplify = FALSE)[[1]]
+      ids <- trimws(ids)
+      lines <- split(ids, ceiling(seq_along(ids) / 2))
+      wrapped_ids <- map_chr(lines, ~ paste(.x, collapse = ", "))
+      paste0("⚠ Also similar (≤3 SNPs):<br>",
+             paste(wrapped_ids, collapse = "<br>"),
+             "<br>— see heatmap")
+    }),
     flag = case_when(
       is.na(clade)                                   ~ "No call",
       !is.na(clade_agree_blast) & !clade_agree_blast ~ "Review",
@@ -1099,10 +1128,18 @@ triage_tbl %>%
 
 .triage_display %>%
   kbl(escape = FALSE,
+      table.attr = 'style="width: auto;"',
       caption = "Batch overview — sorted with items needing review first. Green = clear, red = genotype disagreement, grey = no NextClade call (usually low coverage). Called % = percentage of sequence bases that are unambiguous (A/C/G/T; excludes N and other ambiguous codes). DB lineage count = number of sequences in reference database with same BLAST lineage.") %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = TRUE) %>%
-  column_spec(7, width = "30em", extra_css = "white-space: nowrap; overflow: visible;") %>%  # BLAST lineage - prevent wrapping
-  column_spec(8, background = .snp_colors, bold = TRUE)  # Color code BLAST SNPs
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
+  column_spec(1, width = "10em", extra_css = "white-space: nowrap;") %>%  # LabWareID
+  column_spec(2, width = "12em", extra_css = "white-space: nowrap;") %>%  # SequenceID
+  column_spec(3, width = "10em", extra_css = "white-space: nowrap;") %>%  # Genotype (NC)
+  column_spec(4, width = "12em", extra_css = "white-space: nowrap;") %>%  # Genotype (BLAST)
+  column_spec(6, width = "14em", extra_css = "white-space: nowrap;") %>%  # BLAST top hit
+  column_spec(7, width = "16em", extra_css = "white-space: nowrap;") %>%  # BLAST lineage
+  column_spec(8, background = .snp_colors, bold = TRUE) %>%  # Color code BLAST SNPs
+  column_spec(10, width = "20em", extra_css = "min-width: 18em; white-space: normal; line-height: 1.2; word-break: break-word;") %>%  # Similar BLAST lineage
+  scroll_box(width = "100%")
 ```
 
 `r {n_clear <- sum(triage_tbl$flag=="Clear"); n_rev <- sum(triage_tbl$flag=="Review"); n_no <- sum(triage_tbl$flag=="No call"); sprintf("**%d clear · %d to review · %d no call** of %d samples.", n_clear, n_rev, n_no, nrow(triage_tbl))}`
@@ -1799,6 +1836,18 @@ for (i in seq_along(query_ids)) {
     } else {
       tr <- phangorn::midpoint(tr)
 
+      # If one/few branches are extreme outliers, branch-length plotting can
+      # visually collapse the rest of the tree. In that case, switch to a
+      # topology-only view for readability.
+      edge_len <- tr$edge.length
+      edge_len <- edge_len[is.finite(edge_len) & !is.na(edge_len) & edge_len > 0]
+      long_branch_ratio <- if (length(edge_len) > 0) {
+        max(edge_len) / max(median(edge_len), 1e-6)
+      } else {
+        1
+      }
+      use_cladogram_view <- long_branch_ratio > 25
+
       tip_info <- tibble(id = tr$tip.label) %>%
         left_join(ref_meta %>% select(id_norm, genotype, lineage, lineage_phylo, date),
                   by = c("id" = "id_norm")) %>%
@@ -1839,14 +1888,33 @@ for (i in seq_along(query_ids)) {
         c("Query", ref_colors)
       )
 
-      p <- ggtree(tr, layout = "rectangular", branch.length = "branch.length") %<+% tip_info +
-        geom_tippoint(aes(color = tip_color), size = 3) +
-        geom_tiplab(aes(label = tip_label), size = 2.8, hjust = -0.05) +
-        scale_color_manual(values = pal, name = "Lineage") +
-        guides(color = guide_legend(ncol = 2)) +
-        theme_tree2() +
-        theme(legend.position = "bottom", plot.margin = margin(5, 5, 5, 5)) +
-        hexpand(.6)
+      p <- if (use_cladogram_view) {
+        ggtree(
+          tr,
+          layout = "fan",
+          open.angle = 15,
+          branch.length = "none"
+        ) %<+% tip_info +
+          geom_tippoint(aes(color = tip_color), size = 3) +
+          geom_tiplab(aes(label = tip_label), size = 2.6, align = TRUE, linetype = NA, offset = 0.15) +
+          scale_color_manual(values = pal, name = "Lineage") +
+          guides(color = guide_legend(ncol = 2)) +
+          theme_void() +
+          theme(legend.position = "bottom", plot.margin = margin(5, 5, 5, 5))
+      } else {
+        ggtree(
+          tr,
+          layout = "rectangular",
+          branch.length = "branch.length"
+        ) %<+% tip_info +
+          geom_tippoint(aes(color = tip_color), size = 3) +
+          geom_tiplab(aes(label = tip_label), size = 2.8, hjust = -0.05) +
+          scale_color_manual(values = pal, name = "Lineage") +
+          guides(color = guide_legend(ncol = 2)) +
+          theme_tree2() +
+          theme(legend.position = "bottom", plot.margin = margin(5, 5, 5, 5)) +
+          hexpand(.6)
+      }
 
       bs_df <- p$data %>%
         filter(!isTip, !is.na(label)) %>%
@@ -1862,6 +1930,9 @@ for (i in seq_along(query_ids)) {
       ggsave(.tmp_png, plot = p, width = 18, height = 9, dpi = 150)
       .embed_img(.tmp_png)
       file.remove(.tmp_png)
+      if (use_cladogram_view) {
+        cat("*Display note:* Large branch-length outliers detected. Tree is shown as a topology-only cladogram for readability; branch lengths are still preserved in `tree.treefile`.\n\n")
+      }
       cat("\n")
 
       meta_tbl <- tip_info %>%
@@ -1882,24 +1953,11 @@ for (i in seq_along(query_ids)) {
   # ── 2. SNP distance heatmap ─────────────────────────────────────────────────
   cat("### SNP distance heatmap\n\n")
   
-  # Filter sequences: keep only query + BLAST database sequences (exclude NextClade references)
-  # If too few filtered sequences, fall back to all sequences
+  # Use alignment content as-is.
+  # When aligned_trimmed_blast_only.fa exists, this is already query + selected BLAST neighbors.
+  # For older batches without BLAST-only alignment we keep existing alignment content.
   seqs_heatmap <- if (!is.null(seqs_raw) && nrow(seqs_raw) > 0) {
-    # Get all sequence IDs from alignment
-    all_ids <- rownames(seqs_raw)
-    # Keep only: query (if present) + sequences that are in BLAST database
-    blast_ids <- intersect(community_meta$id, all_ids)
-    query_ids_keep <- if (query_id %in% all_ids) query_id else character()
-    keep_ids <- unique(c(query_ids_keep, blast_ids))
-    
-    # Use filtered set if we have at least 2 sequences; otherwise fall back to all
-    if (length(keep_ids) >= 2) {
-      seqs_raw[keep_ids, , drop = FALSE]
-    } else if (nrow(seqs_raw) >= 2) {
-      seqs_raw  # Fall back to all sequences
-    } else {
-      NULL
-    }
+    if (nrow(seqs_raw) >= 2) seqs_raw else NULL
   } else {
     NULL
   }
@@ -1913,17 +1971,33 @@ for (i in seq_along(query_ids)) {
     for (i in seq_len(n_tips - 1)) {
       for (j in (i + 1):n_tips) {
         s1 <- seqs_heatmap[i, ]; s2 <- seqs_heatmap[j, ]
-        valid <- s1 %in% called & s2 %in% called
+        # Count mismatches on all non-gap aligned positions.
+        # This keeps SNP distance closer to BLAST mismatch behavior.
+        valid <- s1 != "-" & s2 != "-"
         d <- sum(s1[valid] != s2[valid])
         snp_mat[i, j] <- snp_mat[j, i] <- d
       }
     }
 
+    heat_lineage_col <- case_when(
+      "lineage" %in% names(meta) ~ "lineage",
+      "community_lineage" %in% names(meta) ~ "community_lineage",
+      "lineage_phylo" %in% names(meta) ~ "lineage_phylo",
+      TRUE ~ NA_character_
+    )
+
+    ref_meta_hm <- if (!is.na(heat_lineage_col) && nrow(meta) > 0) {
+      meta %>% transmute(id, hm_lineage = as.character(.data[[heat_lineage_col]]))
+    } else {
+      tibble(id = character(), hm_lineage = character())
+    }
+
     lbl_tbl <- tibble(id = ids) %>%
+      left_join(ref_meta_hm, by = "id") %>%
       left_join(community_meta, by = "id") %>%
       mutate(
         lineage_phylo = community_lineage_phylo,
-        lineage       = community_clade,
+        lineage       = coalesce(hm_lineage, community_clade),
         lineage_phylo = if_else(is.na(lineage_phylo) | lineage_phylo == "",
                                 NA_character_, lineage_phylo),
         # Shorten long FASTA headers: extract accession + isolate/strain name
