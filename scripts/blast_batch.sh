@@ -129,6 +129,13 @@ declare -a BLAST_CMD=(
 cat "$OUT_TSV.tmp" >> "$OUT_TSV"
 rm  "$OUT_TSV.tmp"
 
+# Dataset-specific exclusion: ID 534954 is known reverse-complemented in
+# dataset 2026-04-10 and should be ignored in downstream analyses.
+if [[ "$DATASET_DATE" == "2026-04-10" ]]; then
+    awk -F '\t' 'NR==1 || $2 != "534954"' "$OUT_TSV" > "$OUT_TSV.filtered"
+    mv "$OUT_TSV.filtered" "$OUT_TSV"
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 N_HITS=$(tail -n +2 "$OUT_TSV" | wc -l)
 N_QUERIES=$(grep -c "^>" "$BATCH_FA")
