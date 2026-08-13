@@ -119,7 +119,9 @@ blast_query_id = query_id.split()[0]
 lineage_map = {}  # sseqid → lineage
 if metadata_tsv != "NONE":
   try:
-    with open(metadata_tsv) as f:
+    # Some local metadata files may contain non-UTF8 bytes (e.g. Windows-encoded
+    # Norwegian characters). Decode permissively so neighbor selection does not fail.
+    with open(metadata_tsv, encoding="utf-8", errors="replace") as f:
       header = f.readline().rstrip("\n").split("\t")
 
       id_col_idx = 0
