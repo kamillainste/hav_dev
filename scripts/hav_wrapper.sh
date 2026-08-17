@@ -66,17 +66,13 @@ set -euo pipefail
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 RSCRIPT="$HOME/.conda/R_shared/bin/Rscript"
-#DEFAULT_DATASET_DATE="2026-04-10"
-DEFAULT_DATASET_DATE="2026-08-11"
+LATEST_DATASET=$(basename "$(printf '%s\n' '/mnt/n/Virologi/Hepatitt/Hepatitt A/HAV genteknologi/Databaser/local_datasets'/* | sort | tail -n 1)")
+DEFAULT_DATASET_DATE="$LATEST_DATASET"
 DEFAULT_THREADS=4
 DEFAULT_N_NEIGHBORS=30
 BATCH_DIR="/mnt/n/Virologi/Hepatitt/Hepatitt A/HAV genteknologi"
 FASTA_DIR="Fasta"
 
-#echo $RSCRIPT 
-#echo $DEFAULT_DATASET_DATE
-#echo $FASTA_DIR
-#echo $BATCH_DIR
 
 # ── Usage ─────────────────────────────────────────────────────────────────────
 usage() {
@@ -189,22 +185,11 @@ done
 [[ ${#POSITIONAL[@]} -ge 1 ]] && BATCH_NAME="${POSITIONAL[0]}"
 [[ ${#POSITIONAL[@]} -ge 2 ]] && YEAR="${POSITIONAL[1]}"
 
-#echo MODE: $MODE
-#echo YEAR: $YEAR
-#echo BATCH_NAME: $BATCH_NAME
-#echo BATCH_DIR: $BATCH_DIR
 
 # ── Resolve paths ─────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-
-#echo SCRIPT_DIR: $SCRIPT_DIR
-#echo PROJECT_DIR: $PROJECT_DIR
-
 BATCH_DIR="$BATCH_DIR/$YEAR/$BATCH_NAME"
-#echo BATCH_DIR: $BATCH_DIR
-#ls "$BATCH_DIR"
-#echo SAMPLESHEET: $SAMPLESHEET
 
 # For Sanger mode, samplesheet will be auto-generated if not provided
 # For WGS mode, it will be validated later
@@ -215,21 +200,13 @@ if [[ ${#SAMPLESHEET_ARRAY[@]} -gt 0 ]]; then
   SAMPLESHEET="${SAMPLESHEET_ARRAY[0]}"
 fi
 
-#echo SAMPLESHEET: $SAMPLESHEET
-
 FASTA_DIR="$BATCH_DIR/Fasta"
-#ls "$FASTA_DIR"
 BATCH_FA="$FASTA_DIR/$BATCH_NAME.fasta"
-#echo BATCH_FA: $BATCH_FA
-
 OUT_BASE="$HOME/output"
-#echo OUT_BASE: $OUT_BASE
 
 DATASET_DIR="/mnt/n/Virologi/Hepatitt/Hepatitt A/HAV genteknologi/Databaser/local_datasets/$DATASET_DATE"
-#echo DATASET_DIR: $DATASET_DIR
 
 cd "$PROJECT_DIR"
-
 
 # ── Validation ────────────────────────────────────────────────────────────────
 if [[ -z "$MODE" ]]; then
