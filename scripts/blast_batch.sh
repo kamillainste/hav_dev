@@ -105,8 +105,9 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n
 # Opprett en midlertidig mappe i din home-direktory (uten mellomrom)
 mkdir -p "$HOME/blast_tmp_db"
 
-# Lag en symbolsk lenke direkte til hav-filene
-ln -sf "/mnt/n/Virologi/Hepatitt/Hepatitt A/HAV genteknologi/Databaser/local_datasets/2026-04-10/blast_db"/hav.* "$HOME/blast_tmp_db/"
+# Lag en symbolsk lenke direkte til hav-filene i den ønskede datasettversjonen
+# (unngår mellomrom i "/mnt/n/.../HAV genteknologi/..." som blastn kan streve med)
+ln -sf "$DATASET_DIR/blast_db"/hav.* "$HOME/blast_tmp_db/"
 
 # Sett den nye stien som DB_PATH (uten mellomrom)
 DB_PATH="$HOME/blast_tmp_db/hav"
