@@ -106,6 +106,8 @@ safe_read_dna_fasta <- function(path) {
 
 # Normalize IDs to match FASTA headers: spaces → "_", non-ASCII stripped
 norm_id <- function(x) {
+  # Repair invalid byte sequences first (source TSVs are not always valid UTF-8)
+  x <- iconv(x, from = "UTF-8", to = "UTF-8", sub = "")
   x <- gsub(" ", "_", x)
   iconv(x, from = "UTF-8", to = "ASCII", sub = "")
 }
@@ -1839,6 +1841,10 @@ for (i in seq_along(query_ids)) {
       # If one/few branches are extreme outliers, branch-length plotting can
       # visually collapse the rest of the tree. In that case, switch to a
       # topology-only view for readability.
+      # The ratio alone is misleading for tight clusters (near-zero median
+      # branch length inflates the ratio even when the longest branch is
+      # small in absolute terms), so also require a genuinely large absolute
+      # branch length before falling back to the cladogram view.
       edge_len <- tr$edge.length
       edge_len <- edge_len[is.finite(edge_len) & !is.na(edge_len) & edge_len > 0]
       long_branch_ratio <- if (length(edge_len) > 0) {
@@ -1846,7 +1852,10 @@ for (i in seq_along(query_ids)) {
       } else {
         1
       }
-      use_cladogram_view <- long_branch_ratio > 25
+      max_edge_len <- if (length(edge_len) > 0) max(edge_len) else 0
+      # Disabled for now — always render as a phylogram with real branch lengths.
+      # use_cladogram_view <- long_branch_ratio > 25 && max_edge_len > 0.05
+      use_cladogram_view <- FALSE
 
       tip_info <- tibble(id = tr$tip.label) %>%
         left_join(ref_meta %>% select(id_norm, genotype, lineage, lineage_phylo, date),
