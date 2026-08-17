@@ -63,20 +63,27 @@ for (i in seq_along(fasta_files)) {
   basename_no_ext <- sub("\\.(fa|fasta)$", "", basename, ignore.case = TRUE)
   
   # Split on first underscore: LabWareID_SekvensID-HAV
-  parts <- strsplit(basename_no_ext, "_", fixed = TRUE)[[1]]
+  underscore_pos <- regexpr("_", basename_no_ext, fixed = TRUE)
   
-  if (length(parts) < 2) {
-    cat(sprintf("WARNING: Could not parse filename: %s (expected: LabWareID_SekvensID-HAV)\n", 
-                fasta_files[i]), file = stderr())
-    next
+  if (underscore_pos == -1) {
+    # No underscore at all: whole name is LabWareID, SekvensID missing
+    labware_id <- basename_no_ext
+    sequence_id <- ""
+  } else {
+    labware_id <- substr(basename_no_ext, 1, underscore_pos - 1)
+    sequence_id <- substr(basename_no_ext, underscore_pos + 1, nchar(basename_no_ext))
   }
   
-  labware_id <- parts[1]
-  sequence_id <- paste(parts[-1], collapse = "_")  # Handle underscores in sequence ID
-  
-  if (labware_id == "" || sequence_id == "") {
-    cat(sprintf("WARNING: Empty fields in filename: %s\n", fasta_files[i]), file = stderr())
-    next
+  # Missing LabWareID or SekvensID (e.g. "Posktr_.fa") defaults to "0"
+  if (labware_id == "") {
+    cat(sprintf("WARNING: Missing LabWareID in filename: %s — defaulting to '0'\n",
+                fasta_files[i]), file = stderr())
+    labware_id <- "0"
+  }
+  if (sequence_id == "") {
+    cat(sprintf("WARNING: Missing SekvensID in filename: %s — defaulting to '0'\n",
+                fasta_files[i]), file = stderr())
+    sequence_id <- "0"
   }
   
   # Sample should be the full filename (without extension) so prepare_input_fasta.R can find it
