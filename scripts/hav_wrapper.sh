@@ -66,7 +66,8 @@ set -euo pipefail
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 RSCRIPT="$HOME/.conda/R_shared/bin/Rscript"
-DEFAULT_DATASET_DATE="2026-04-10"
+#DEFAULT_DATASET_DATE="2026-04-10"
+DEFAULT_DATASET_DATE="2026-08-11"
 DEFAULT_THREADS=4
 DEFAULT_N_NEIGHBORS=30
 BATCH_DIR="/mnt/n/Virologi/Hepatitt/Hepatitt A/HAV genteknologi"
