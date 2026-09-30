@@ -57,8 +57,8 @@ under `/mnt/c/...`:
 
 ```bash
 cd ~
-git clone <repository URL>      # private repo: use `gh auth login` or an SSH key first
-cd hav-consensus
+git clone -b alex_dev https://github.com/kamillainste/hav_dev.git   # private repo: use `gh auth login` or an SSH key first
+cd hav_dev/HAV_WGS
 ```
 
 > Clone with git *from the Ubuntu terminal*. A copy made on the Windows side can
