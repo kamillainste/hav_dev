@@ -1,0 +1,22 @@
+# Built by setup.sh
+.build/
+
+# Pipeline output and data: never commit sample data or patient metadata
+output/
+results/
+*.fastq
+*.fastq.gz
+*.fq.gz
+*.bam
+*.bai
+*.sif
+
+# Samplesheets hold sample metadata; only the example is tracked
+*.tsv
+!example/samplesheet_example.tsv
+
+# Editors / OS
+.vscode/
+*.swp
+.DS_Store
+__pycache__/

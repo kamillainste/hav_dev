@@ -1,0 +1,15 @@
+--- a/ViroConstrictor/workflow/helpers/preset_params.json
++++ b/ViroConstrictor/workflow/helpers/preset_params.json
+@@ -42,9 +42,9 @@
+             "Fastp_PerReadQC_Settings_nanopore": "--disable_quality_filtering",
+             "Fastp_PerReadQC_Settings_illumina": "--disable_quality_filtering",
+             "Fastp_PerReadQC_Settings_iontorrent": "--disable_quality_filtering",
+-            "Fastp_QC_SlidingWindow_Settings_nanopore": "--cut_right --cut_right_window_size 20 --cut_right_mean_quality 7",
+-            "Fastp_QC_SlidingWindow_Settings_illumina": "--cut_right --cut_right_window_size 5 --cut_right_mean_quality 20",
+-            "Fastp_QC_SlidingWindow_Settings_iontorrent": "--cut_right --cut_right_window_size 15 --cut_right_mean_quality 20",
++            "Fastp_QC_SlidingWindow_Settings_nanopore": "",
++            "Fastp_QC_SlidingWindow_Settings_illumina": "",
++            "Fastp_QC_SlidingWindow_Settings_iontorrent": "",
+             "Fastp_LowComplexityFilter_Settings_nanopore": "",
+             "Fastp_LowComplexityFilter_Settings_illumina": "",
+             "Fastp_LowComplexityFilter_Settings_iontorrent": "",

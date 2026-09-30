@@ -1,0 +1,4 @@
+path_to_run_folder	sample	ct	gt	barcode	run	kommentar
+/home/yourname/nanopore_runs	SAMPLE001	25.1	IA	barcode01	RUN_2026_01	example row
+/home/yourname/nanopore_runs	SAMPLE002	31.4	IB	barcode02	RUN_2026_01	
+/home/yourname/nanopore_runs	NTC			barcode03	RUN_2026_01	negative control
