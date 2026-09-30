@@ -11,7 +11,7 @@ pipeline maintainer.
 | # | step | tool | settings |
 |---|---|---|---|
 | 1 | read QC | NanoPlot 1.32.1 | raw reads |
-| 2 | read filter | chopper 0.12.0 | mean quality ≥ Q10, length ≥ 1,000 bp |
+| 2 | read filter | chopper 0.12.0 | mean quality ≥ Q10, length ≥ 300 bp |
 | 3 | read QC | NanoPlot | filtered reads |
 | 4 | reference choice | ViroConstrictor `--match-ref` | best of IA (LC435031.1), IB (M14707.1), IIIA (AB279732.1) |
 | 5 | alignment | minimap2 `--splice` (HEPATOVIRUS preset) | |
@@ -70,11 +70,12 @@ Mean % of the genome called in the consensus (not `N`):
   number comes from how it counts depth (per primer pool), not from detecting
   contamination. No run-level contamination threshold is implemented; check
   NTCs by hand.
-- **Length filter.** Chopper's ≥ 1,000 bp filter removes most raw reads in
-  low-depth samples: 78% at 52–740x. Reads < 300 bp are primer dimers and
-  concatemers. Reads of 300–999 bp are partial HAV amplicons, plus human
-  off-target products in some samples. A lower cut-off (300–500 bp) might raise
-  completeness at low depth but has not been tested in the pipeline.
+- **Length filter.** The benchmark above was run with chopper at ≥ 1,000 bp,
+  which removed most raw reads in low-depth samples: 78% at 52–740x. Reads
+  < 300 bp are primer dimers and concatemers. Reads of 300–999 bp are partial
+  HAV amplicons, plus human off-target products in some samples. The pipeline
+  now filters at ≥ 300 bp to keep those partial amplicons; this setting has
+  not been benchmarked yet.
 - **Human off-target reads.** In some samples up to ~50–60% of filtered reads
   are human PCR products of the HAVNET primers. They do not map to HAV and drop
   out at alignment, but they lower the effective depth.

@@ -4,7 +4,7 @@ Whole-genome consensus sequences for hepatitis A virus from Oxford Nanopore
 amplicon reads (HAVNET WGS primer scheme, genotypes IA, IB and IIIA).
 
 ```
-raw reads ─► NanoPlot ─► chopper (Q10, ≥1000 bp) ─► NanoPlot ─► ViroConstrictor 1.6.6 ─► consensus + coverage plots
+raw reads ─► NanoPlot ─► chopper (Q10, ≥300 bp) ─► NanoPlot ─► ViroConstrictor 1.6.6 ─► consensus + coverage plots
 ```
 
 For each sample the pipeline writes a consensus FASTA, coverage plots, a summary
@@ -79,6 +79,18 @@ This:
 - runs one container as a test
 
 It ends with `Setup complete`. It is safe to re-run.
+
+**f. Put the primer file in place.** The HAVNET primer scheme is not in the
+repository. Get `HAVNET_wgs_primers_fixed.fasta` from a colleague or the
+internal drive and copy it to `~/HAV_primers/`:
+
+```bash
+mkdir -p ~/HAV_primers
+cp /path/to/HAVNET_wgs_primers_fixed.fasta ~/HAV_primers/
+```
+
+To keep it somewhere else, set `HAV_PRIMERS` to the file when you run the
+pipeline: `HAV_PRIMERS=/path/to/primers.fasta bash run_hav_pipeline.sh ...`
 
 ## 2. Make a samplesheet
 
@@ -190,6 +202,7 @@ not reach the genome ends, so even a perfect sample reaches only about 98–99%.
 | symptom | fix |
 |---|---|
 | `$'\r': command not found` or `bad interpreter` | Windows line endings: delete the folder and clone again from the Ubuntu terminal |
+| `ERROR: primers file not found` | copy the primer file to `~/HAV_primers/` or set `HAV_PRIMERS` (step 1f) |
 | `ERROR: … Run setup.sh first` | run `bash setup.sh`, or re-run it if it did not end with `Setup complete` |
 | ViroConstrictor asks questions (local/grid, auto-update, …) | `~/.ViroConstrictor_defaultprofile.ini` is missing or incomplete: press Ctrl-C, run `bash setup.sh` |
 | setup: `apptainer cannot run …` | make sure it is WSL 2 (`wsl -l -v`), then `wsl --update` in PowerShell, restart, re-run setup |
@@ -210,7 +223,7 @@ envs/                 conda environment definitions (main tool versions)
 envs/lock/            exact tested package sets; setup.sh uses these on Linux/WSL
 patches/              the change to ViroConstrictor (3 lines)
 scripts/              plot_coverage.R, relabel_amplicons.py, apply_patch.py
-assets/               HAV reference genomes (IA, IB, IIIA) and HAVNET primers
+assets/               HAV reference genomes (IA, IB, IIIA); primers are kept locally (step 1f)
 example/              example samplesheet
 docs/METHOD.md        what each step does and why these settings
 ```

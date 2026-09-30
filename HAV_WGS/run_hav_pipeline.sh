@@ -5,7 +5,7 @@ set -euo pipefail
 # run_hav_pipeline.sh — HAV whole-genome consensus from ONT amplicon reads
 #                       (HAVNET WGS scheme, genotypes IA / IB / IIIA)
 #
-#   raw reads -> NanoPlot -> chopper (Q10, >= 1000 bp) -> NanoPlot
+#   raw reads -> NanoPlot -> chopper (Q10, >= 300 bp) -> NanoPlot
 #             -> ViroConstrictor 1.6.6 (--amplicon-type fragmented,
 #                                       fastp --cut_right removed)
 #             -> consensus FASTA, coverage plots, summary table
@@ -73,10 +73,15 @@ set -euo pipefail
 #   * fastp --cut_right removed, via the patched package copy that setup.sh
 #     builds in .build/. fastp still runs, but only drops reads < 100 bp.
 #
-# Chopper: Q10, minlength 1000. 1000 rather than 1500 because IIIA amplicon 4
-# is only 1261 bp: at 1500 that amplicon was filtered out entirely, leaving a
-# ~480 bp hole at 4440-4915. Do not raise it above ~1200 without checking the
-# IIIA amplicon-4 span first.
+# Chopper: Q10, minlength 300. Reads < 300 bp are primer dimers and
+# concatemers; 300-999 bp reads are partial HAV amplicons, which help at low
+# depth. The benchmark in docs/METHOD.md was run at minlength 1000. Never raise
+# it above ~1200: IIIA amplicon 4 is only 1261 bp, and at 1500 it was filtered
+# out entirely, leaving a ~480 bp hole at 4440-4915.
+#
+# Primers: the HAVNET primer scheme is not kept in this repository. Put it in
+# a local folder, by default ~/HAV_primers/HAVNET_wgs_primers_fixed.fasta, or
+# point HAV_PRIMERS at the file.
 #
 # NEGATIVE CONTROLS: nothing here removes low-level carry-over. An NTC can get
 # a partial (mosaic) consensus from reads of other samples on the flowcell.
@@ -87,7 +92,7 @@ PIPELINE_VERSION="1.0.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 REFERENCE="${SCRIPT_DIR}/assets/HAV_refs/IA_IB_IIIA_seqs_fixed.fasta"
-PRIMERS="${SCRIPT_DIR}/assets/HAV_primers/HAVNET_wgs_primers_fixed.fasta"
+PRIMERS="${HAV_PRIMERS:-${HOME}/HAV_primers/HAVNET_wgs_primers_fixed.fasta}"
 PLOT_SCRIPT="${SCRIPT_DIR}/scripts/plot_coverage.R"
 RELABEL_SCRIPT="${SCRIPT_DIR}/scripts/relabel_amplicons.py"
 
@@ -97,7 +102,7 @@ THREADS="${THREADS:-6}"
 MIN_COVERAGE=20
 PRIMER_MISMATCH_RATE=0.1
 CHOPPER_QUALITY=10
-CHOPPER_MINLENGTH=1000
+CHOPPER_MINLENGTH=300
 AMPLICON_TYPE="fragmented"
 
 # Samples with fewer than this many reads (raw, or surviving chopper) are
@@ -136,7 +141,8 @@ case "$#" in
 esac
 [[ -f "$METADATA" ]]  || { echo "ERROR: samplesheet not found: $METADATA" >&2; exit 1; }
 [[ -f "$REFERENCE" ]] || { echo "ERROR: reference file not found: $REFERENCE" >&2; exit 1; }
-[[ -f "$PRIMERS" ]]   || { echo "ERROR: primers file not found: $PRIMERS" >&2; exit 1; }
+[[ -f "$PRIMERS" ]]   || { echo "ERROR: primers file not found: $PRIMERS" >&2
+                         echo "       Copy it there, or set HAV_PRIMERS=/path/to/primers.fasta (see README.md)." >&2; exit 1; }
 # Snakemake shell commands inside ViroConstrictor do not quote paths.
 case "$OUTPUT_DIR" in *" "*)
     echo "ERROR: output_dir must not contain spaces: $OUTPUT_DIR" >&2; exit 1 ;; esac

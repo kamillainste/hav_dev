@@ -1,3 +1,6 @@
+# HAVNET primer scheme: kept in a local folder, never committed (see README 1f)
+assets/HAV_primers/
+
 # Built by setup.sh
 .build/
 
