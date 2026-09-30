@@ -82,3 +82,15 @@ Mean % of the genome called in the consensus (not `N`):
   1.5–7.5% of amplicon reads. That leaves amplicons 1, 3 and 5 thin. It is a
   lab issue, visible in the coverage plots.
 - **Primer sequence at primer sites** in the consensus has not been checked.
+
+## Validation of this repository (2026-09-30)
+
+- **Same result as the benchmark.** A fresh clone, installed with `setup.sh`
+  (new conda envs from `envs/lock/`, a new ViroConstrictor profile, containers
+  downloaded from ghcr.io), was run on one benchmark sample (genotype IA, 175x,
+  2,008 reads after chopper). Its consensus was byte-identical to the
+  benchmark's, and its summary row and amplicon coverage table matched.
+- **Installation.** `setup.sh` took ~9 minutes on a Linux server, of which
+  ~6 minutes was the 2.3 GB container download. It has not yet been run on
+  WSL itself.
+- **Not yet done:** the full 14-sample comparison with the benchmark.
