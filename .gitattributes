@@ -1,0 +1,5 @@
+# Keep Unix line endings even when the repository is checked out on Windows:
+# bash scripts with CRLF endings fail with "$'\r': command not found".
+* text=auto eol=lf
+*.png binary
+*.sif binary

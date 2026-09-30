@@ -1,0 +1,7 @@
+name: hav_nanoplot
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - nanoplot=1.32.1

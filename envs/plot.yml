@@ -1,0 +1,9 @@
+# R for scripts/plot_coverage.R (coverage PNGs).
+name: hav_plot
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - r-base>=4.3
+  - r-ggplot2>=3.5
+  - r-patchwork>=1.2
