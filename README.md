@@ -195,7 +195,7 @@ not reach the genome ends, so even a perfect sample reaches only about 98–99%.
 | setup: `apptainer cannot run …` | make sure it is WSL 2 (`wsl -l -v`), then `wsl --update` in PowerShell, restart, re-run setup |
 | setup: container download failed | `ghcr.io` must be reachable (VPN/proxy?). Re-run setup; finished downloads are kept |
 | `No space left on device` | free space in WSL (`df -h ~ /tmp`); or point scratch elsewhere: `HAV_TMPDIR=~/tmp bash run_hav_pipeline.sh ...` |
-| a conda env is broken | `conda env remove -n hav_<name>`, then `bash setup.sh` |
+| a conda env is broken, or NanoPlot fails with a matplotlib error | `conda env remove -n hav_<name>`, then `bash setup.sh` (it recreates the env from `envs/lock/`) |
 | a sample says `FAILED: ViroConstrictor error` | look at `<output>/<run>/<sample>/ViroConstrictor_<time>.log` and `logs/` next to it; re-run that sample into a new output folder |
 
 `HAV_ENV_PREFIX` (default `hav_`) changes the env names. Set it the same way
@@ -206,7 +206,8 @@ for `setup.sh` and `run_hav_pipeline.sh`.
 ```
 run_hav_pipeline.sh   the pipeline
 setup.sh              one-time installation
-envs/                 conda environment definitions
+envs/                 conda environment definitions (main tool versions)
+envs/lock/            exact tested package sets; setup.sh uses these on Linux/WSL
 patches/              the change to ViroConstrictor (3 lines)
 scripts/              plot_coverage.R, relabel_amplicons.py, apply_patch.py
 assets/               HAV reference genomes (IA, IB, IIIA) and HAVNET primers

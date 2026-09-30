@@ -69,11 +69,22 @@ echo "env prefix : $HAV_ENV_PREFIX"
 
 # ---------------------------------------------------------------------------
 step "1/4 Conda environments"
+# On linux-64 (incl. WSL) the envs are made from envs/lock/*.linux-64.txt: the
+# exact package set the pipeline was tested with. The .yml files only pin the
+# main tools; their dependencies drift over time (NanoPlot 1.32.1 broke on a
+# newer matplotlib). Other platforms fall back to the .yml files.
 env_exists() { conda env list | awk '{print $1}' | grep -qx "$1"; }
+PLATFORM="$(uname -s)-$(uname -m)"
 for yml in "$REPO_DIR"/envs/*.yml; do
-    name="${HAV_ENV_PREFIX}$(basename "$yml" .yml)"
+    base="$(basename "$yml" .yml)"
+    name="${HAV_ENV_PREFIX}${base}"
+    lock="$REPO_DIR/envs/lock/${base}.linux-64.txt"
     if env_exists "$name"; then
         echo "$name: exists, left unchanged  (to rebuild: conda env remove -n $name, then re-run)"
+    elif [[ "$PLATFORM" == "Linux-x86_64" && -f "$lock" ]]; then
+        echo "$name: creating from envs/lock/$(basename "$lock") (exact tested versions) ..."
+        conda create -q -y -n "$name" --file "$lock" \
+            || die "could not create $name (see the conda output above)"
     else
         echo "$name: creating from envs/$(basename "$yml") ..."
         "$SOLVER" env create -q -y -n "$name" -f "$yml" \
